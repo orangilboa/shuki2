@@ -8,9 +8,6 @@ import { artifactsRouter } from "./routes/artifacts.js";
 import { endpointsRouter, modelsRouter } from "./routes/endpoints.js";
 import { migrate } from "./db/migrate.js";
 
-// Run schema sync BEFORE we start accepting requests.
-migrate();
-
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -31,6 +28,15 @@ app.use("/api/endpoints", endpointsRouter);
 app.use("/api/models", modelsRouter);
 app.get("/api/events", eventsFirehose);
 
-app.listen(PORT, () => {
-  console.log(`[openshuki-backend] listening on http://localhost:${PORT}`);
+// Run schema sync BEFORE we start accepting requests.
+async function start(): Promise<void> {
+  await migrate();
+  app.listen(PORT, () => {
+    console.log(`[openshuki-backend] listening on http://localhost:${PORT}`);
+  });
+}
+
+start().catch((err: unknown) => {
+  console.error("[openshuki-backend] startup failed:", err);
+  process.exit(1);
 });

@@ -176,20 +176,18 @@ export async function persistArtifact(
     });
 
     const createdAt = Date.now();
-    db.insert(artifacts)
-      .values({
-        id,
-        runId,
-        seq: env.seq,
-        name,
-        kind,
-        mime,
-        bytes,
-        contentText: text,
-        contentPath: null,
-        createdAt
-      })
-      .run();
+    await db.insert(artifacts).values({
+      id,
+      runId,
+      seq: env.seq,
+      name,
+      kind,
+      mime,
+      bytes,
+      contentText: text,
+      contentPath: null,
+      createdAt
+    });
 
     return {
       id,
@@ -244,21 +242,19 @@ export async function persistArtifact(
   });
 
   const createdAt = Date.now();
-  db.insert(artifacts)
-    .values({
-      id,
-      runId,
-      seq: env.seq,
-      name: finalName,
-      kind,
-      mime,
-      bytes,
-      contentText: null,
-      // Stored relative to ARTIFACTS_DIR for portability.
-      contentPath: path.posix.join(runId, finalName),
-      createdAt
-    })
-    .run();
+  await db.insert(artifacts).values({
+    id,
+    runId,
+    seq: env.seq,
+    name: finalName,
+    kind,
+    mime,
+    bytes,
+    contentText: null,
+    // Stored relative to ARTIFACTS_DIR for portability.
+    contentPath: path.posix.join(runId, finalName),
+    createdAt
+  });
 
   return {
     id,

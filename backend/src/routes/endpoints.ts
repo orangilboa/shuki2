@@ -29,11 +29,11 @@ function isNonEmptyString(v: unknown): v is string {
 
 // ---------- /api/endpoints ------------------------------------------------
 
-endpointsRouter.get("/", (_req: Request, res: Response) => {
-  res.json(listAll());
+endpointsRouter.get("/", async (_req: Request, res: Response) => {
+  res.json(await listAll());
 });
 
-endpointsRouter.post("/", (req: Request, res: Response) => {
+endpointsRouter.post("/", async (req: Request, res: Response) => {
   const body = (req.body ?? {}) as Record<string, unknown>;
   if (!isNonEmptyString(body.displayName)) {
     res.status(400).json({ error: "invalid_displayName" });
@@ -52,7 +52,7 @@ endpointsRouter.post("/", (req: Request, res: Response) => {
     res.status(400).json({ error: "invalid_apiKey" });
     return;
   }
-  const created = createUserEndpoint({
+  const created = await createUserEndpoint({
     displayName: body.displayName,
     baseUrl: body.baseUrl,
     apiKey
@@ -60,8 +60,8 @@ endpointsRouter.post("/", (req: Request, res: Response) => {
   res.json(created);
 });
 
-endpointsRouter.patch("/:id", (req: Request, res: Response) => {
-  const found = findById(req.params.id);
+endpointsRouter.patch("/:id", async (req: Request, res: Response) => {
+  const found = await findById((req.params.id as string));
   if (!found) {
     res.status(404).json({ error: "not_found" });
     return;
@@ -96,7 +96,7 @@ endpointsRouter.patch("/:id", (req: Request, res: Response) => {
       return;
     }
   }
-  const updated = updateUserEndpoint(req.params.id, patch);
+  const updated = await updateUserEndpoint((req.params.id as string), patch);
   if (!updated) {
     res.status(404).json({ error: "not_found" });
     return;
@@ -104,8 +104,8 @@ endpointsRouter.patch("/:id", (req: Request, res: Response) => {
   res.json(updated);
 });
 
-endpointsRouter.delete("/:id", (req: Request, res: Response) => {
-  const found = findById(req.params.id);
+endpointsRouter.delete("/:id", async (req: Request, res: Response) => {
+  const found = await findById((req.params.id as string));
   if (!found) {
     res.status(404).json({ error: "not_found" });
     return;
@@ -114,7 +114,7 @@ endpointsRouter.delete("/:id", (req: Request, res: Response) => {
     res.status(403).json({ error: "config_endpoints_are_read_only" });
     return;
   }
-  deleteUserEndpoint(req.params.id);
+  await deleteUserEndpoint((req.params.id as string));
   res.status(204).end();
 });
 

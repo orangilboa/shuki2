@@ -25,27 +25,29 @@ function rowToMessage(r: typeof messages.$inferSelect): ChatMessage {
   };
 }
 
-conversationsRouter.get("/", (_req: Request, res: Response) => {
-  const rows = db.select().from(conversations).orderBy(desc(conversations.updatedAt)).all();
+conversationsRouter.get("/", async (_req: Request, res: Response) => {
+  const rows = await db
+    .select()
+    .from(conversations)
+    .orderBy(desc(conversations.updatedAt));
   res.json(rows.map(rowToSummary));
 });
 
-conversationsRouter.get("/:id", (req: Request, res: Response) => {
-  const conv = db
+conversationsRouter.get("/:id", async (req: Request, res: Response) => {
+  const convRows = await db
     .select()
     .from(conversations)
-    .where(eq(conversations.id, req.params.id))
-    .get();
+    .where(eq(conversations.id, (req.params.id as string)));
+  const conv = convRows[0];
   if (!conv) {
     res.status(404).json({ error: "not_found" });
     return;
   }
-  const msgs = db
+  const msgs = await db
     .select()
     .from(messages)
     .where(eq(messages.conversationId, conv.id))
-    .orderBy(asc(messages.createdAt))
-    .all();
+    .orderBy(asc(messages.createdAt));
 
   const full: Conversation = {
     ...rowToSummary(conv),
@@ -54,18 +56,16 @@ conversationsRouter.get("/:id", (req: Request, res: Response) => {
   res.json(full);
 });
 
-conversationsRouter.post("/", (_req: Request, res: Response) => {
+conversationsRouter.post("/", async (_req: Request, res: Response) => {
   const id = crypto.randomUUID();
   const now = Date.now();
-  db.insert(conversations)
-    .values({
-      id,
-      title: "New chat",
-      preview: "",
-      createdAt: now,
-      updatedAt: now
-    })
-    .run();
+  await db.insert(conversations).values({
+    id,
+    title: "New chat",
+    preview: "",
+    createdAt: now,
+    updatedAt: now
+  });
   const conv: Conversation = {
     id,
     title: "New chat",
@@ -77,10 +77,13 @@ conversationsRouter.post("/", (_req: Request, res: Response) => {
   res.json(conv);
 });
 
-conversationsRouter.post("/:id/messages", (req: Request, res: Response) => {
-  const convId = req.params.id;
-  const exists = db.select().from(conversations).where(eq(conversations.id, convId)).get();
-  if (!exists) {
+conversationsRouter.post("/:id/messages", async (req: Request, res: Response) => {
+  const convId = (req.params.id as string);
+  const existsRows = await db
+    .select()
+    .from(conversations)
+    .where(eq(conversations.id, convId));
+  if (existsRows.length === 0) {
     res.status(404).json({ error: "not_found" });
     return;
   }
@@ -101,7 +104,7 @@ conversationsRouter.post("/:id/messages", (req: Request, res: Response) => {
     content,
     createdAt: Date.now()
   };
-  db.insert(messages).values(userMsg).run();
+  await db.insert(messages).values(userMsg);
 
   const replyContent = "(mock) Got it. I'll get back to you shortly with the full plan.";
   const replyMsg = {
@@ -111,18 +114,18 @@ conversationsRouter.post("/:id/messages", (req: Request, res: Response) => {
     content: replyContent,
     createdAt: Date.now() + 1
   };
-  db.insert(messages).values(replyMsg).run();
+  await db.insert(messages).values(replyMsg);
 
   // Update preview + updated_at on the parent conversation. Persist `model`
   // when the client sent one (sticky last-used; null clears).
-  db.update(conversations)
+  await db
+    .update(conversations)
     .set({
       preview: replyContent,
       updatedAt: replyMsg.createdAt,
       ...(model !== undefined ? { model } : {})
     })
-    .where(eq(conversations.id, convId))
-    .run();
+    .where(eq(conversations.id, convId));
 
   res.json({
     messages: [

@@ -145,7 +145,7 @@ Constraints:
 3. Add an entry to `backend/config/agents.json` (id, name, inputs, exec block).
 4. Restart the backend (`tsx watch` will pick up the schema/migrate; agents.json is read once on boot).
 5. Open the frontend; the new agent shows up in the left panel under "Agents" with an auto-generated form.
-6. (Optional) Add Python deps to `agents/requirements.txt` or TS deps to `agents/package.json`. Run `pip install -r requirements.txt` or `npm install` in `agents/`.
+6. (Optional) Add Python deps to `agents/requirements.txt` or TS deps to `agents/package.json`. Run `pnpm --filter agents exec pip install -r requirements.txt` or `pnpm install` at the workspace root.
 
 ## Constraints / tips
 

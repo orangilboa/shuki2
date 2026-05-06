@@ -26,13 +26,12 @@ function byName(a: Agent, b: Agent): number {
   return a.name.localeCompare(b.name);
 }
 
-export function listAll(): Agent[] {
+export async function listAll(): Promise<Agent[]> {
   const config = getConfigAgents().slice().sort(byName);
-  const userRows = db
+  const userRows = await db
     .select()
     .from(agentsTable)
-    .orderBy(asc(agentsTable.name))
-    .all();
+    .orderBy(asc(agentsTable.name));
   const seen = new Set(config.map((a) => a.id));
   const user = userRows
     .map(rowToAgent)
@@ -41,10 +40,11 @@ export function listAll(): Agent[] {
   return [...config, ...user];
 }
 
-export function findById(id: string): Agent | null {
+export async function findById(id: string): Promise<Agent | null> {
   const cfg = getConfigAgents().find((a) => a.id === id);
   if (cfg) return cfg;
-  const row = db.select().from(agentsTable).where(eq(agentsTable.id, id)).get();
+  const rows = await db.select().from(agentsTable).where(eq(agentsTable.id, id));
+  const row = rows[0];
   if (!row) return null;
   return rowToAgent(row);
 }
@@ -57,21 +57,20 @@ export type CreateUserAgentInput = {
   exec?: AgentExec;
 };
 
-export function createUserAgent(input: CreateUserAgentInput): Agent {
+export async function createUserAgent(input: CreateUserAgentInput): Promise<Agent> {
   const id = crypto.randomUUID();
   const now = Date.now();
-  db.insert(agentsTable)
-    .values({
-      id,
-      name: input.name,
-      description: input.description ?? "",
-      inputsJson: inputsToJson(input.inputs ?? []),
-      execJson: execToJson(input.exec ?? { kind: "mock" }),
-      model: input.model ?? null,
-      createdAt: now
-    })
-    .run();
-  const row = db.select().from(agentsTable).where(eq(agentsTable.id, id)).get();
+  await db.insert(agentsTable).values({
+    id,
+    name: input.name,
+    description: input.description ?? "",
+    inputsJson: inputsToJson(input.inputs ?? []),
+    execJson: execToJson(input.exec ?? { kind: "mock" }),
+    model: input.model ?? null,
+    createdAt: now
+  });
+  const rows = await db.select().from(agentsTable).where(eq(agentsTable.id, id));
+  const row = rows[0];
   if (!row) throw new Error("[agents/store] insert vanished");
   return rowToAgent(row);
 }
@@ -85,9 +84,15 @@ export type PatchUserAgentInput = {
   exec?: AgentExec;
 };
 
-export function updateUserAgent(id: string, patch: PatchUserAgentInput): Agent | null {
-  const existing = db.select().from(agentsTable).where(eq(agentsTable.id, id)).get();
-  if (!existing) return null;
+export async function updateUserAgent(
+  id: string,
+  patch: PatchUserAgentInput
+): Promise<Agent | null> {
+  const existingRows = await db
+    .select()
+    .from(agentsTable)
+    .where(eq(agentsTable.id, id));
+  if (existingRows.length === 0) return null;
 
   const next: Partial<AgentRow> = {};
   if (patch.name !== undefined) next.name = patch.name;
@@ -97,20 +102,27 @@ export function updateUserAgent(id: string, patch: PatchUserAgentInput): Agent |
   if (patch.exec !== undefined) next.execJson = execToJson(patch.exec);
 
   if (Object.keys(next).length > 0) {
-    db.update(agentsTable).set(next).where(eq(agentsTable.id, id)).run();
+    await db.update(agentsTable).set(next).where(eq(agentsTable.id, id));
   }
-  const after = db.select().from(agentsTable).where(eq(agentsTable.id, id)).get();
+  const afterRows = await db
+    .select()
+    .from(agentsTable)
+    .where(eq(agentsTable.id, id));
+  const after = afterRows[0];
   if (!after) return null;
   return rowToAgent(after);
 }
 
-export function deleteUserAgent(id: string): boolean {
-  const existing = db.select().from(agentsTable).where(eq(agentsTable.id, id)).get();
-  if (!existing) return false;
+export async function deleteUserAgent(id: string): Promise<boolean> {
+  const existingRows = await db
+    .select()
+    .from(agentsTable)
+    .where(eq(agentsTable.id, id));
+  if (existingRows.length === 0) return false;
   // The `runs.agent_id` FK has no ON DELETE clause in the schema. Delete the
   // dependent runs first; their `run_events` cascade away automatically.
-  db.delete(runsTable).where(eq(runsTable.agentId, id)).run();
-  db.delete(agentsTable).where(eq(agentsTable.id, id)).run();
+  await db.delete(runsTable).where(eq(runsTable.agentId, id));
+  await db.delete(agentsTable).where(eq(agentsTable.id, id));
   return true;
 }
 
@@ -127,12 +139,13 @@ export function isConfigAgent(id: string): boolean {
  * the config file because the API never serves the shadow — it always serves
  * the merged listing where config wins.
  */
-export function ensureConfigAgentShadow(id: string): void {
+export async function ensureConfigAgentShadow(id: string): Promise<void> {
   const cfg = getConfigAgents().find((a) => a.id === id);
   if (!cfg) return;
-  const existing = db.select().from(agentsTable).where(eq(agentsTable.id, id)).get();
-  if (existing) return;
-  db.insert(agentsTable)
+  // Use Postgres ON CONFLICT for atomic idempotency — avoids a race where two
+  // concurrent runs both see "no row" and both try to insert.
+  await db
+    .insert(agentsTable)
     .values({
       id: cfg.id,
       name: cfg.name,
@@ -142,5 +155,5 @@ export function ensureConfigAgentShadow(id: string): void {
       model: cfg.model,
       createdAt: Date.now()
     })
-    .run();
+    .onConflictDoNothing({ target: agentsTable.id });
 }

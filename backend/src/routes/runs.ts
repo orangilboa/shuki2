@@ -2,7 +2,7 @@ import { Router, type Request, type Response } from "express";
 import { desc, eq } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { runs, agents } from "../db/schema.js";
-import { replay, subscribe, subscribeAll } from "../runs/bus.js";
+import { flush, replay, subscribe, subscribeAll } from "../runs/bus.js";
 import { cancelRun, isActive } from "../runs/engine.js";
 import type { RunEventEnvelope } from "../runs/events.js";
 import { listArtifactsForRun } from "./artifacts.js";
@@ -34,7 +34,7 @@ function rowToTask(r: {
   };
 }
 
-function setupSse(req: Request, res: Response): void {
+function setupSse(_req: Request, res: Response): void {
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache, no-transform");
   res.setHeader("Connection", "keep-alive");
@@ -57,7 +57,7 @@ export const runsRouter: Router = Router();
 
 // ---------- list / detail ------------------------------------------------
 
-runsRouter.get("/", (req: Request, res: Response) => {
+runsRouter.get("/", async (req: Request, res: Response) => {
   const status = typeof req.query.status === "string" ? req.query.status : null;
   let q = db
     .select({
@@ -81,12 +81,12 @@ runsRouter.get("/", (req: Request, res: Response) => {
     q = q.where(eq(runs.status, status));
   }
 
-  const rows = q.all();
+  const rows = await q;
   res.json(rows.map(rowToTask));
 });
 
-runsRouter.get("/:id", (req: Request, res: Response) => {
-  const r = db
+runsRouter.get("/:id", async (req: Request, res: Response) => {
+  const rows = await db
     .select({
       id: runs.id,
       agentId: runs.agentId,
@@ -101,8 +101,8 @@ runsRouter.get("/:id", (req: Request, res: Response) => {
     })
     .from(runs)
     .leftJoin(agents, eq(runs.agentId, agents.id))
-    .where(eq(runs.id, req.params.id))
-    .get();
+    .where(eq(runs.id, (req.params.id as string)));
+  const r = rows[0];
   if (!r) {
     res.status(404).json({ error: "not_found" });
     return;
@@ -113,30 +113,52 @@ runsRouter.get("/:id", (req: Request, res: Response) => {
 // ---------- per-run SSE --------------------------------------------------
 
 runsRouter.get("/:id/events", async (req: Request, res: Response) => {
-  const runId = req.params.id;
-  const exists = db.select({ id: runs.id }).from(runs).where(eq(runs.id, runId)).get();
-  if (!exists) {
+  const runId = (req.params.id as string);
+  const existsRows = await db
+    .select({ id: runs.id })
+    .from(runs)
+    .where(eq(runs.id, runId));
+  if (existsRows.length === 0) {
     res.status(404).json({ error: "not_found" });
     return;
   }
 
   setupSse(req, res);
 
-  // Replay everything we have on disk first.
-  const history = await replay(runId);
+  // Subscribe FIRST (before replay) so we don't miss any event published
+  // while we're awaiting the replay query. Buffer live events until replay
+  // finishes, then drain the buffer with seq-dedup, then switch to direct
+  // delivery. With the async write queue in bus.ts, the old "replay then
+  // subscribe" order has a window where events can vanish between the two.
+  const buffer: RunEventEnvelope[] = [];
+  let direct = false;
   let lastSeq = 0;
+
+  const unsub = subscribe(runId, (ev) => {
+    if (direct) {
+      if (ev.seq <= lastSeq) return;
+      lastSeq = ev.seq;
+      writeEvent(res, ev);
+    } else {
+      buffer.push(ev);
+    }
+  });
+
+  // Flush in-flight writes so replay sees the full history.
+  await flush(runId);
+  const history = await replay(runId);
   for (const ev of history) {
     writeEvent(res, ev);
     if (ev.seq > lastSeq) lastSeq = ev.seq;
   }
-
-  // Then subscribe live. Drop any duplicate that snuck in between replay and
-  // subscribe (race window: an event published while we were replaying).
-  const unsub = subscribe(runId, (ev) => {
-    if (ev.seq <= lastSeq) return;
-    lastSeq = ev.seq;
-    writeEvent(res, ev);
-  });
+  // Drain buffered live events that arrived during the replay window.
+  for (const ev of buffer) {
+    if (ev.seq > lastSeq) {
+      writeEvent(res, ev);
+      lastSeq = ev.seq;
+    }
+  }
+  direct = true;
 
   const hb = setInterval(() => writeHeartbeat(res), HEARTBEAT_MS);
 
@@ -153,9 +175,10 @@ runsRouter.get("/:id/artifacts", listArtifactsForRun);
 
 // ---------- cancel -------------------------------------------------------
 
-runsRouter.post("/:id/cancel", (req: Request, res: Response) => {
-  const runId = req.params.id;
-  const row = db.select().from(runs).where(eq(runs.id, runId)).get();
+runsRouter.post("/:id/cancel", async (req: Request, res: Response) => {
+  const runId = (req.params.id as string);
+  const rows = await db.select().from(runs).where(eq(runs.id, runId));
+  const row = rows[0];
   if (!row) {
     res.status(404).json({ error: "not_found" });
     return;
@@ -170,10 +193,10 @@ runsRouter.post("/:id/cancel", (req: Request, res: Response) => {
   // Run isn't active in this process — flip it to failed directly if it
   // wasn't already terminal.
   if (row.status === "queued" || row.status === "running") {
-    db.update(runs)
+    await db
+      .update(runs)
       .set({ status: "failed", finishedAt: Date.now(), error: "aborted" })
-      .where(eq(runs.id, runId))
-      .run();
+      .where(eq(runs.id, runId));
     res.json({ ok: true, mode: "direct" });
     return;
   }

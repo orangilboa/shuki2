@@ -179,7 +179,7 @@ Same as Python:
 If your agent needs to call an LLM, use `@langchain/openai` (already implicit via `@langchain/langgraph`'s peer deps; install if not present):
 
 ```bash
-cd agents && npm i @langchain/openai
+pnpm --filter agents add @langchain/openai
 ```
 
 Pass the model from the picker as a CLI arg (`--model "{model}"`) and the API key via `exec.env`:

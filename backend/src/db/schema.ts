@@ -1,16 +1,29 @@
-// Drizzle schema (SQLite today).
-// TODO: postgres variant via drizzle-orm/pg-core when we move past the scaffold.
-// For now all tables live in sqlite-core; columns use unix-ms integers for
-// timestamps (portable to pg later as bigint or timestamptz).
+// Drizzle schema (Postgres).
+// Timestamps are unix-ms (`bigint`) so the wire shape matches the existing
+// API contract; revisit `timestamptz` later if timezone semantics matter.
+// JSON-shaped columns stay as `text` (we JSON.stringify/parse at the edges)
+// to keep call-site churn minimal during the SQLite→Postgres swap.
 
 import { sql } from "drizzle-orm";
-import { sqliteTable, text, integer, real, index } from "drizzle-orm/sqlite-core";
+import {
+  pgTable,
+  text,
+  bigint,
+  integer,
+  doublePrecision,
+  index
+} from "drizzle-orm/pg-core";
 
-const nowMs = sql`(CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER))`;
+// Postgres expression for "now in unix milliseconds".
+const nowMs = sql`(EXTRACT(EPOCH FROM NOW()) * 1000)::bigint`;
+
+// `bigint({ mode: "number" })` returns a JS `number` (not bigint). Safe for
+// timestamps and seq counters until 2^53 ms ≈ year 287396.
+const bigintN = (name: string) => bigint(name, { mode: "number" });
 
 // ---------- conversations -------------------------------------------------
 
-export const conversations = sqliteTable("conversations", {
+export const conversations = pgTable("conversations", {
   id: text("id")
     .primaryKey()
     .$defaultFn(() => crypto.randomUUID()),
@@ -18,8 +31,8 @@ export const conversations = sqliteTable("conversations", {
   preview: text("preview").notNull().default(""),
   // Sticky last-used model for this conversation, format "<endpointId>::<modelId>".
   model: text("model"),
-  createdAt: integer("created_at").notNull().default(nowMs),
-  updatedAt: integer("updated_at").notNull().default(nowMs)
+  createdAt: bigintN("created_at").notNull().default(nowMs),
+  updatedAt: bigintN("updated_at").notNull().default(nowMs)
 });
 
 export type Conversation = typeof conversations.$inferSelect;
@@ -27,7 +40,7 @@ export type NewConversation = typeof conversations.$inferInsert;
 
 // ---------- messages ------------------------------------------------------
 
-export const messages = sqliteTable(
+export const messages = pgTable(
   "messages",
   {
     id: text("id")
@@ -38,7 +51,7 @@ export const messages = sqliteTable(
       .references(() => conversations.id, { onDelete: "cascade" }),
     role: text("role", { enum: ["user", "assistant", "system"] }).notNull(),
     content: text("content").notNull(),
-    createdAt: integer("created_at").notNull().default(nowMs)
+    createdAt: bigintN("created_at").notNull().default(nowMs)
   },
   (t) => ({
     convIdx: index("messages_conversation_id_idx").on(t.conversationId)
@@ -50,17 +63,17 @@ export type NewMessage = typeof messages.$inferInsert;
 
 // ---------- scheduled_tasks ----------------------------------------------
 
-export const scheduledTasks = sqliteTable("scheduled_tasks", {
+export const scheduledTasks = pgTable("scheduled_tasks", {
   id: text("id")
     .primaryKey()
     .$defaultFn(() => crypto.randomUUID()),
   name: text("name").notNull(),
   cron: text("cron").notNull(),
-  nextRunAt: integer("next_run_at").notNull(),
+  nextRunAt: bigintN("next_run_at").notNull(),
   description: text("description").notNull().default(""),
   // per-task model override (e.g. "claude-opus-4-7")
   model: text("model"),
-  createdAt: integer("created_at").notNull().default(nowMs)
+  createdAt: bigintN("created_at").notNull().default(nowMs)
 });
 
 export type ScheduledTask = typeof scheduledTasks.$inferSelect;
@@ -68,7 +81,7 @@ export type NewScheduledTask = typeof scheduledTasks.$inferInsert;
 
 // ---------- agents --------------------------------------------------------
 
-export const agents = sqliteTable("agents", {
+export const agents = pgTable("agents", {
   id: text("id")
     .primaryKey()
     .$defaultFn(() => crypto.randomUUID()),
@@ -81,7 +94,7 @@ export const agents = sqliteTable("agents", {
   model: text("model"),
   // JSON-encoded AgentExec; null is treated as { kind: "mock" }.
   execJson: text("exec_json"),
-  createdAt: integer("created_at").notNull().default(nowMs)
+  createdAt: bigintN("created_at").notNull().default(nowMs)
 });
 
 export type Agent = typeof agents.$inferSelect;
@@ -89,7 +102,7 @@ export type NewAgent = typeof agents.$inferInsert;
 
 // ---------- runs ----------------------------------------------------------
 
-export const runs = sqliteTable(
+export const runs = pgTable(
   "runs",
   {
     id: text("id")
@@ -102,9 +115,9 @@ export const runs = sqliteTable(
     status: text("status", {
       enum: ["queued", "running", "succeeded", "failed"]
     }).notNull(),
-    progress: real("progress").notNull().default(0),
-    startedAt: integer("started_at").notNull().default(nowMs),
-    finishedAt: integer("finished_at"),
+    progress: doublePrecision("progress").notNull().default(0),
+    startedAt: bigintN("started_at").notNull().default(nowMs),
+    finishedAt: bigintN("finished_at"),
     error: text("error"),
     inputsJson: text("inputs_json"),
     // Resolved model used for this run (format "<endpointId>::<modelId>").
@@ -123,8 +136,8 @@ export type NewRun = typeof runs.$inferInsert;
 
 // Expected `type` values:
 //   run_started | node_start | node_end | token | tool_call | tool_result
-//   | custom    | error      | done
-export const runEvents = sqliteTable(
+//   | custom    | error      | done      | artifact
+export const runEvents = pgTable(
   "run_events",
   {
     id: text("id")
@@ -136,7 +149,7 @@ export const runEvents = sqliteTable(
     // monotonic per run; combined with run_id as a composite index for
     // ordered streaming reads.
     seq: integer("seq").notNull(),
-    ts: integer("ts").notNull().default(nowMs),
+    ts: bigintN("ts").notNull().default(nowMs),
     type: text("type").notNull(),
     node: text("node"),
     payloadJson: text("payload_json").notNull().default("{}")
@@ -155,17 +168,17 @@ export type NewRunEvent = typeof runEvents.$inferInsert;
 // User-added LLM endpoints. Built-in endpoints live in config/endpoints.json
 // and are merged at the API edge (see src/endpoints/store.ts).
 //
-// SECURITY: api_key is stored plaintext in SQLite for this local scaffold.
+// SECURITY: api_key is stored plaintext for this local scaffold.
 // Encrypt at rest before shipping a multi-user build.
-export const endpoints = sqliteTable("endpoints", {
+export const endpoints = pgTable("endpoints", {
   id: text("id")
     .primaryKey()
     .$defaultFn(() => crypto.randomUUID()),
   displayName: text("display_name").notNull(),
   baseUrl: text("base_url").notNull(),
   apiKey: text("api_key"),
-  createdAt: integer("created_at").notNull().default(nowMs),
-  updatedAt: integer("updated_at").notNull().default(nowMs)
+  createdAt: bigintN("created_at").notNull().default(nowMs),
+  updatedAt: bigintN("updated_at").notNull().default(nowMs)
 });
 
 export type Endpoint = typeof endpoints.$inferSelect;
@@ -177,7 +190,7 @@ export type NewEndpoint = typeof endpoints.$inferInsert;
 // for text-ish kinds (md, text) or file-backed (`content_path`) for binaries
 // (image, audio, video). `seq` shares the same monotonic counter used for
 // run_events, so artifact and event ordering interleave deterministically.
-export const artifacts = sqliteTable(
+export const artifacts = pgTable(
   "artifacts",
   {
     id: text("id")
@@ -191,11 +204,11 @@ export const artifacts = sqliteTable(
     // 'md' | 'text' | 'image' | 'audio' | 'video'
     kind: text("kind").notNull(),
     mime: text("mime").notNull(),
-    bytes: integer("bytes").notNull().default(0),
+    bytes: bigintN("bytes").notNull().default(0),
     contentText: text("content_text"),
     // path relative to <backend>/data/artifacts/
     contentPath: text("content_path"),
-    createdAt: integer("created_at").notNull().default(nowMs)
+    createdAt: bigintN("created_at").notNull().default(nowMs)
   },
   (t) => ({
     runIdx: index("artifacts_run_id_idx").on(t.runId),

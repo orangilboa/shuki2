@@ -115,7 +115,7 @@ export async function getAllModels(opts?: { refresh?: boolean }): Promise<Models
   if (!opts?.refresh && cache && cache.expiresAt > now) {
     return cache.payload;
   }
-  const all = listAllResolved();
+  const all = await listAllResolved();
   const results = await Promise.all(all.map((ep) => fetchOne(ep)));
   cache = {
     expiresAt: Date.now() + CACHE_TTL_MS,

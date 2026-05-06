@@ -1,6 +1,6 @@
 # Backend — agent guide
 
-Node + Express + Drizzle + better-sqlite3, all TypeScript ESM with NodeNext modules. Hot reload via `tsx watch`.
+Node + Express + Drizzle + Postgres (`pg`), all TypeScript ESM with NodeNext modules. Hot reload via `tsx watch`. Postgres reachable at `DB_URL` is a hard prerequisite — there is no SQLite fallback.
 
 ## Layout
 
@@ -8,10 +8,10 @@ Node + Express + Drizzle + better-sqlite3, all TypeScript ESM with NodeNext modu
 src/
   server.ts                    Composition root: dotenv, migrate, mount routers, listen.
   db/
-    client.ts                  Driver-selecting client. `db` (drizzle) and `rawConn` (better-sqlite3).
-    config.ts                  DB_DRIVER + DB_URL env loader.
-    schema.ts                  All Drizzle table definitions + inferred Select/Insert types.
-    migrate.ts                 Additive-only schema sync run on startup.
+    client.ts                  pg.Pool + drizzle (node-postgres). Exports `db` and `pool`.
+    config.ts                  DB_URL env loader (validates the URI prefix).
+    schema.ts                  All Drizzle table definitions (pg-core) + inferred Select/Insert types.
+    migrate.ts                 Idempotent DDL script run on startup (CREATE TABLE/INDEX IF NOT EXISTS).
   endpoints/                   LLM-endpoint catalog (config/endpoints.json + endpoints DB table).
     config.ts                  Loads + validates config/endpoints.json.
     store.ts                   DB CRUD + merged listing.
@@ -38,7 +38,7 @@ src/
 config/
   endpoints.json               Built-in LLM endpoints, read-only via API. Keys via apiKeyEnv.
   agents.json                  Built-in agents, read-only via API. Currently weather + traffic.
-data/                          Created at runtime. Holds openshuki.db and artifacts/<runId>/<file>.
+data/                          Created at runtime. Holds artifacts/<runId>/<file> (DB lives in Postgres).
 ```
 
 ## API surface (current)
@@ -61,7 +61,7 @@ data/                          Created at runtime. Holds openshuki.db and artifa
 `endpoints/` and `agents/` are the two existing instances. A new catalog should:
 
 1. Define a JSON file at `backend/config/<thing>.json` with built-in entries.
-2. Add a SQLite table for user entries with the same logical shape.
+2. Add a Postgres table (in `schema.ts` and `migrate.ts`) for user entries with the same logical shape.
 3. Write a `config.ts` to load/validate the JSON (cache it; allow `_resetCache()` for tests).
 4. Write a `store.ts` exposing `listAll()` (config first, then user, sorted), `findById()`, `createUser…`, `updateUser…`, `deleteUser…`. `isConfig…(id)` returns true for config entries; the route layer returns **403 `<thing>_are_read_only`** when those are mutated.
 5. Conflict policy: same id in config and DB → config wins (the route returns the config row).
@@ -76,7 +76,7 @@ The `Agent` catalog adds an extra wrinkle (`ensureConfigAgentShadow` inserts a m
 2. Publishes `run_started` with `{ agentId, name, model, inputs }` — model resolution: `opts.model ?? agent.model ?? null`.
 3. Routes to the runner: `subprocess` → `runSubprocess(...)`; otherwise the mock loop.
 
-The bus's `publish(runId, partial)` assigns a monotonic per-run `seq`, persists to `run_events`, and broadcasts. Frontends subscribe via SSE; replay reads from `run_events` first, then live-tails.
+The bus's `publish(runId, partial)` assigns a monotonic per-run `seq` synchronously and returns the envelope; persistence + fan-out are chained on a per-run promise queue (so callers don't await, but events still land in seq order). For correctness during run shutdown, the subprocess runner calls `await flush(runId)` before resolving — that drains the queue so terminal `done` is observable. Frontends subscribe via SSE; the per-run handler in `routes/runs.ts` subscribes BEFORE replaying to avoid a race where async DB writes haven't landed yet when replay queries.
 
 If you add a new event type, update **`runs/events.ts`** AND **`runs/runners/subprocess.ts`'s `KNOWN_EVENT_TYPES` set**, AND `frontend/src/types/index.ts`. See [../docs/protocol.md](../docs/protocol.md) for the full vocabulary.
 
@@ -101,12 +101,12 @@ When extending, never block the main loop — copy files / heavy I/O via the art
 
 ### Migration policy
 
-The startup syncer in `db/migrate.ts` is **additive only**: `CREATE TABLE IF NOT EXISTS`, `ADD COLUMN`, `CREATE INDEX IF NOT EXISTS`. It does *not* alter column types/nullability/defaults, and it doesn't drop anything. One small exception: a one-time pre-sync RENAME shim handles the `tools` table → `agents` and `runs.tool_id` → `runs.agent_id` rename for existing DBs. Rationale: SQLite's `ALTER COLUMN` story is bad, and we want zero-friction startup. If you need to change a column, do it manually or recreate the DB. See [../docs/db.md](../docs/db.md) for the planned postgres migration story.
+The startup script in `db/migrate.ts` is a hand-written idempotent DDL block: `CREATE TABLE IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS`. Every boot runs it inside a transaction. To add a column or table, edit BOTH `schema.ts` (Drizzle types) AND `migrate.ts` (actual DDL). For destructive changes (drop column, change type), use `psql` directly — the runtime script never alters or drops. See [../docs/db.md](../docs/db.md).
 
 ## Constraints
 
 - Strict TS, no `any` in public surfaces (route responses, exported functions).
-- Native modules only (`better-sqlite3` is the heaviest dep). Don't add ORMs, query builders, or HTTP clients beyond what's there.
+- Pure-JS deps only (`pg` is the DB driver — no native build step). Don't add ORMs, query builders, or HTTP clients beyond what's there.
 - Routes never `throw` — always respond with the right status code. The engine writes terminal state to `runs` itself; routes don't need to await.
 
 ## Common gotchas
