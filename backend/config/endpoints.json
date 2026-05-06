@@ -1,0 +1,22 @@
+{
+  "endpoints": [
+    {
+      "id": "openai",
+      "displayName": "OpenAI",
+      "baseUrl": "https://api.openai.com/v1",
+      "apiKeyEnv": "OPENAI_API_KEY"
+    },
+    {
+      "id": "openrouter",
+      "displayName": "OpenRouter",
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "apiKeyEnv": "OPENROUTER_API_KEY"
+    },
+    {
+      "id": "ollama-local",
+      "displayName": "Ollama (local)",
+      "baseUrl": "http://localhost:11434/v1",
+      "apiKeyEnv": null
+    }
+  ]
+}

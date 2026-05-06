@@ -1,0 +1,157 @@
+# Agents — author guide
+
+An "agent" is an executable that the openshuki backend launches as a child process when the user clicks "Run agent" in the UI. Agents communicate with the backend over **stdout JSON Lines** — one event per line. The runner translates those events into our run-event bus, persists them, and streams to the frontend.
+
+This is the doc to read when adding or modifying an agent. For the wire-level protocol, see [../docs/protocol.md](../docs/protocol.md). For full step-by-step walkthroughs, see [../docs/agent-python.md](../docs/agent-python.md) or [../docs/agent-typescript.md](../docs/agent-typescript.md).
+
+## Layout
+
+```
+agent_util.py        Python helpers — emit/node_start/node_end/token/.../artifact/done.
+agent_util.ts        TS helpers — same surface, camelCased.
+package.json         Shared TS deps (@langchain/langgraph, tsx, typescript).
+tsconfig.json        Shared tsconfig — `tsc --noEmit` checks every agent together.
+requirements.txt     Shared Python deps (langgraph, langchain-core).
+weather/             Demo: 2-node Python LangGraph (fetch → format).
+traffic/             Demo: 2-node TS LangGraph (lookup → summarize).
+```
+
+Pick a language per agent — Python or TypeScript both work. Use whichever fits the libraries you need.
+
+## How an agent is wired up
+
+1. **Code** lives in a subdirectory of `agents/` (one per agent).
+2. **Config** registers the agent as built-in in `backend/config/agents.json`. Backend restart picks up the change.
+3. **Form** auto-generates from the `inputs` array in the config — no UI code.
+4. **Run dispatch** is generic: the backend spawns `command` with `args` (templated from form values), captures stdout/stderr, and surfaces every event to the frontend.
+
+To register an agent, append an entry under `"agents"` in `backend/config/agents.json`:
+
+```json
+{
+  "id": "weather",
+  "name": "Weather forecast",
+  "description": "Mock multi-day weather forecast for a city.",
+  "model": null,
+  "inputs": [
+    { "name": "location", "label": "City",  "type": "string", "required": true },
+    { "name": "days",     "label": "Days",  "type": "number", "default": 3 }
+  ],
+  "exec": {
+    "kind": "subprocess",
+    "command": "python",
+    "args": ["-u", "{AGENTS_DIR}/weather/main.py",
+             "--location", "{location}", "--days", "{days}"],
+    "cwd": "{AGENTS_DIR}/weather",
+    "protocol": "jsonl"
+  }
+}
+```
+
+Templating in `args`, `cwd`, and `env` values:
+
+| Token | Resolves to |
+|---|---|
+| `{AGENTS_DIR}` | absolute path to this `agents/` directory |
+| `{<inputName>}` | string-cast value from the form (input-spec `default` if missing) |
+| `${VAR_NAME}` (in `env` block only) | `process.env[VAR_NAME] ?? ""` |
+
+Use `python -u` for Python agents — the `-u` flag disables stdout buffering so events appear in the UI in real time. For TS, prefer `npx tsx agents/<agent>/main.ts` (the runner handles Windows `.cmd` resolution automatically).
+
+## The protocol — quick reference
+
+Each line on stdout is one JSON object: `{ "type": <event-type>, "node": <string?>, "payload": <any> }`. Line-buffered: end every line with `\n` and flush. Anything that fails to parse becomes a `token` event. stderr is captured too and appears as `token` events with `node: "_stderr"`.
+
+Vocabulary (use the `agent_util` helpers — don't hand-format):
+
+| Event | When |
+|---|---|
+| `node_start` | Entering a graph node. Payload is whatever's useful for debugging. |
+| `node_end` | Leaving a node. Include `progress` (0–1) on payload to advance the right-panel bar. |
+| `token` | An incremental text fragment. Payload `{ text }`. |
+| `tool_call` / `tool_result` | An LLM tool/function call inside the graph. Pair them. |
+| `custom` | Anything structured you want surfaced verbatim. |
+| `artifact` | A piece of output (md/text/image/audio/video) — see "Artifacts" below. |
+| `error` | A fatal error message. The backend will set the run to failed. |
+| `done` | Final event with `{ ok, ...summary }`. Optional — if you exit cleanly, the runner synthesises one. |
+
+Full payload shapes are in [../docs/protocol.md](../docs/protocol.md).
+
+## Helpers
+
+### Python (`agent_util.py`)
+
+```python
+from agent_util import (
+    node_start, node_end, token, tool_call, tool_result,
+    custom, artifact, artifact_file, emit_error, done,
+)
+
+node_start("fetch", {"location": "Tokyo"})
+token("looking up Tokyo…", node="fetch")
+artifact("forecast.md", "md", "# Tokyo\n…")
+node_end("fetch", progress=0.5)
+done(ok=True, summary="Forecast ready")
+```
+
+The module forces `sys.stdout` to UTF-8 on import (Windows safety — the default cp1252 mangles `°`/`µ`/etc.). Don't `print()` to stdout outside the helpers — anything raw becomes a `token` event.
+
+### TypeScript (`agent_util.ts`)
+
+```ts
+import {
+  nodeStart, nodeEnd, token, toolCall, toolResult,
+  custom, artifact, artifactFile, emitError, done,
+} from "../agent_util.js";
+
+nodeStart("lookup", { origin, destination });
+token(`hitting maps API…`, "lookup");
+artifact("traffic.md", "md", `# Traffic\n…`);
+nodeEnd("lookup", { progress: 0.5 });
+done(true, { summary: "ETA ~46 min" });
+```
+
+The TS helpers write directly to `process.stdout`. Same JSON-per-line contract.
+
+## Artifacts
+
+Anything you want preserved past the live run goes through `artifact` events. The runner persists them and exposes them under the run's "Artifacts" tab in the UI.
+
+```python
+# Inline (md or text only):
+artifact("summary.md", "md", "# Done\n…", node="format")
+
+# File on disk (any kind, required for binary):
+artifact_file("chart.png", "image", "./chart.png", node="render")
+# `path` may be absolute or relative to the agent's cwd.
+```
+
+The runner copies file-path artifacts into `backend/data/artifacts/<runId>/<sanitised-name>`, dedupes name collisions, defaults the mime by kind, and serves the content via `GET /api/artifacts/<id>/content`. Agents never touch the artifact directory directly.
+
+Constraints:
+- Inline `content` is allowed only for `md` and `text` kinds.
+- `image` / `audio` / `video` require a `path` (the runner won't accept inline binary).
+- `name` is sanitised to filesystem-safe characters; bad names fall back to `artifact-<seq>`.
+- Don't pass both `content` and `path` in the same event; one or the other.
+
+## Adding a new agent — checklist
+
+1. `mkdir agents/<name>` and write `main.py` or `main.ts`. Import helpers from the parent dir.
+2. Run it standalone first — the JSONL output should already look right:
+   ```bash
+   python -u agents/<name>/main.py --... | head
+   npx tsx agents/<name>/main.ts --...     # from inside agents/
+   ```
+3. Add an entry to `backend/config/agents.json` (id, name, inputs, exec block).
+4. Restart the backend (`tsx watch` will pick up the schema/migrate; agents.json is read once on boot).
+5. Open the frontend; the new agent shows up in the left panel under "Agents" with an auto-generated form.
+6. (Optional) Add Python deps to `agents/requirements.txt` or TS deps to `agents/package.json`. Run `pip install -r requirements.txt` or `npm install` in `agents/`.
+
+## Constraints / tips
+
+- **Always end your agent with a clean exit code** (0 on success, non-zero on failure). The runner writes `runs.status = "failed"` on non-zero exit if no `error`/`done` was emitted explicitly.
+- **`done` is optional but recommended** when you have a final summary worth attaching. Pass it as `done(ok=True, summary="…")`.
+- **Don't use stdout for anything but JSONL events**. If you call a library that prints to stdout, redirect to stderr (Python: `print(..., file=sys.stderr)` or `logging.basicConfig()`; Node: `console.error(...)`). stderr lines become `token` events tagged with `node: "_stderr"` — you'll see them in the log but they won't pollute the protocol.
+- **Models**: the `model` selected in the UI is forwarded as `run_started.payload.model` (format `<endpointId>::<modelId>`) — your agent can inspect it and call the right LLM. The mapping from endpoint id to base URL + key is the backend's responsibility (see `backend/src/endpoints/`); for a future agent that calls an LLM directly, you'll want the backend to forward the resolved base URL + key as env vars in the `exec.env` block.
+- **Don't write files outside your cwd or `data/artifacts/<runId>/`**. The runner doesn't enforce this, but stuff outside is unmanaged.
+- **TypeScript agents run via `tsx`**, not pre-compiled. The shared `agents/tsconfig.json` is `noEmit: true` — used only for type-checking. If you need a compile step, do it in your agent's own subdirectory.

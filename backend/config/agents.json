@@ -1,0 +1,76 @@
+{
+  "agents": [
+    {
+      "id": "weather",
+      "name": "Weather forecast",
+      "description": "Mock multi-day weather forecast for a city. 2-node LangGraph (Python).",
+      "model": null,
+      "inputs": [
+        {
+          "name": "location",
+          "label": "City",
+          "type": "string",
+          "required": true,
+          "description": "City or area to forecast (e.g. Tokyo)."
+        },
+        {
+          "name": "days",
+          "label": "Days",
+          "type": "number",
+          "default": 3,
+          "description": "Number of days to forecast."
+        }
+      ],
+      "exec": {
+        "kind": "subprocess",
+        "command": "python",
+        "args": [
+          "-u",
+          "{AGENTS_DIR}/weather/main.py",
+          "--location",
+          "{location}",
+          "--days",
+          "{days}"
+        ],
+        "cwd": "{AGENTS_DIR}/weather",
+        "protocol": "jsonl"
+      }
+    },
+    {
+      "id": "traffic",
+      "name": "Traffic estimate",
+      "description": "Mock traffic estimate between two locations. 2-node LangGraph (TypeScript).",
+      "model": null,
+      "inputs": [
+        {
+          "name": "origin",
+          "label": "From",
+          "type": "string",
+          "required": true,
+          "description": "Origin (e.g. Shibuya)."
+        },
+        {
+          "name": "destination",
+          "label": "To",
+          "type": "string",
+          "required": true,
+          "description": "Destination (e.g. Shinjuku)."
+        }
+      ],
+      "exec": {
+        "kind": "subprocess",
+        "command": "npx",
+        "args": [
+          "tsx",
+          "{AGENTS_DIR}/traffic/main.ts",
+          "--origin",
+          "{origin}",
+          "--destination",
+          "{destination}"
+        ],
+        "cwd": "{AGENTS_DIR}",
+        "protocol": "jsonl"
+      }
+    }
+  ]
+}

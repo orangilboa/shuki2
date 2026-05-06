@@ -1,0 +1,18 @@
+{
+  "name": "openshuki-tools",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "traffic": "tsx traffic/main.ts"
+  },
+  "dependencies": {
+    "@langchain/langgraph": "^0.2.0",
+    "@langchain/core": "^0.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "name": "openshuki",
+  "version": "1.0.0",
+  "description": "Personal-assistant scaffold with Express backend, React frontend, and subprocess agents",
+  "private": true,
+  "packageManager": "pnpm@9.0.0",
+  "scripts": {
+    "install:all": "pnpm install -r",
+    "dev": "concurrently \"pnpm --filter backend dev\" \"pnpm --filter frontend dev\"",
+    "dev:backend": "pnpm --filter backend dev",
+    "dev:frontend": "pnpm --filter frontend dev",
+    "build:backend": "pnpm --filter backend build",
+    "build:frontend": "pnpm --filter frontend build",
+    "agents:install": "pnpm --filter agents install && pnpm --filter agents exec pip install -r requirements.txt"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
