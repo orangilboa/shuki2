@@ -11,7 +11,9 @@
     "dev:frontend": "pnpm --filter frontend dev",
     "build:backend": "pnpm --filter backend build",
     "build:frontend": "pnpm --filter frontend build",
-    "agents:install": "pnpm --filter agents install && pnpm --filter agents exec pip install -r requirements.txt"
+    "agents:install": "pnpm --filter agents install && pnpm --filter agents exec pip install -r requirements.txt",
+    "vendor": "node scripts/vendor-deps.mjs",
+    "install:offline": "node scripts/install-offline.mjs"
   },
   "devDependencies": {
     "concurrently": "^8.2.2"
