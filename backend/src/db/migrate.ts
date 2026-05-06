@@ -1,133 +1,136 @@
-// Lightweight startup syncer for SQLite.
+// Idempotent startup schema sync for Postgres.
 //
-// Choice: we use a custom additive-only syncer instead of `drizzle-kit push`.
-// Reasons: drizzle-kit's programmatic API is unstable and meant to be called
-// from its own CLI; spawning the CLI on every dev boot is slow and noisy. For
-// our scaffold "create tables, add columns, add indexes" is sufficient.
-//
-// Behaviour:
-//   - CREATE TABLE IF NOT EXISTS for every drizzle table.
-//   - PRAGMA table_info to find missing columns; ALTER TABLE ADD COLUMN them.
-//   - CREATE INDEX IF NOT EXISTS for every declared index.
-//   - Never drops or rewrites; safe to run on every boot.
+// We use a hand-written DDL script (instead of drizzle-kit migrations or
+// drizzle introspection) because it's small, readable, and doesn't require
+// generating migration files in a closed-network environment. Every statement
+// is `IF NOT EXISTS` so it's safe to run on every boot — it never drops or
+// rewrites. To remove a column or change a type, do it manually with psql.
 
-import { getTableConfig, SQLiteTable } from "drizzle-orm/sqlite-core";
-import type { AnySQLiteColumn } from "drizzle-orm/sqlite-core";
-import { rawConn, config, schema } from "./client.js";
+import { pool, config } from "./client.js";
 
-function columnDdl(col: AnySQLiteColumn): string {
-  const parts: string[] = [`"${col.name}"`, col.getSQLType().toUpperCase()];
-  if (col.primary) parts.push("PRIMARY KEY");
-  if (col.notNull) parts.push("NOT NULL");
-  const def = (col as { default?: unknown; defaultFn?: unknown }).default;
-  if (def !== undefined && def !== null) {
-    if (typeof def === "object" && def !== null && "queryChunks" in (def as object)) {
-      // a drizzle SQL chunk (like our nowMs) — let SQLite evaluate it.
-      // We can't easily stringify SQL chunks here, so we leave it out of the
-      // CREATE TABLE; the application-side $defaultFn / sql default will apply
-      // on insert. Acceptable for additive scaffolding.
-    } else if (typeof def === "string") {
-      parts.push(`DEFAULT '${def.replace(/'/g, "''")}'`);
-    } else if (typeof def === "number" || typeof def === "boolean") {
-      parts.push(`DEFAULT ${Number(def)}`);
-    }
-  }
-  return parts.join(" ");
-}
+const DDL = `
+CREATE TABLE IF NOT EXISTS conversations (
+  id          text PRIMARY KEY,
+  title       text NOT NULL,
+  preview     text NOT NULL DEFAULT '',
+  model       text,
+  created_at  bigint NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint,
+  updated_at  bigint NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint
+);
 
-type IndexInfo = { name: string; columns: string[]; unique: boolean };
+CREATE TABLE IF NOT EXISTS messages (
+  id              text PRIMARY KEY,
+  conversation_id text NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  role            text NOT NULL,
+  content         text NOT NULL,
+  created_at      bigint NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint
+);
+CREATE INDEX IF NOT EXISTS messages_conversation_id_idx ON messages (conversation_id);
 
-function extractIndexes(idxBuilders: readonly unknown[]): IndexInfo[] {
-  const out: IndexInfo[] = [];
-  for (const b of idxBuilders) {
-    const cfg = (b as { config?: { name: string; columns: AnySQLiteColumn[]; unique?: boolean } })
-      .config;
-    if (!cfg) continue;
-    out.push({
-      name: cfg.name,
-      columns: cfg.columns.map((c) => c.name),
-      unique: Boolean(cfg.unique)
-    });
-  }
-  return out;
-}
+CREATE TABLE IF NOT EXISTS scheduled_tasks (
+  id           text PRIMARY KEY,
+  name         text NOT NULL,
+  cron         text NOT NULL,
+  next_run_at  bigint NOT NULL,
+  description  text NOT NULL DEFAULT '',
+  model        text,
+  created_at   bigint NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint
+);
 
-function syncTable(table: SQLiteTable): void {
-  const cfg = getTableConfig(table);
-  const tableName = cfg.name;
+CREATE TABLE IF NOT EXISTS agents (
+  id           text PRIMARY KEY,
+  name         text NOT NULL,
+  description  text NOT NULL DEFAULT '',
+  inputs_json  text NOT NULL DEFAULT '[]',
+  model        text,
+  exec_json    text,
+  created_at   bigint NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint
+);
 
-  const colDefs = cfg.columns.map(columnDdl);
-  const fkDefs = cfg.foreignKeys.map((fk) => {
-    const ref = fk.reference();
-    const from = ref.columns.map((c) => `"${c.name}"`).join(", ");
-    const to = ref.foreignColumns.map((c) => `"${c.name}"`).join(", ");
-    const refTable = getTableConfig(ref.foreignTable).name;
-    const onDelete = fk.onDelete ? ` ON DELETE ${fk.onDelete.toUpperCase()}` : "";
-    return `FOREIGN KEY (${from}) REFERENCES "${refTable}"(${to})${onDelete}`;
-  });
+CREATE TABLE IF NOT EXISTS runs (
+  id           text PRIMARY KEY,
+  agent_id     text NOT NULL REFERENCES agents(id),
+  name         text NOT NULL,
+  status       text NOT NULL,
+  progress     double precision NOT NULL DEFAULT 0,
+  started_at   bigint NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint,
+  finished_at  bigint,
+  error        text,
+  inputs_json  text,
+  model        text
+);
+CREATE INDEX IF NOT EXISTS runs_agent_id_idx ON runs (agent_id);
 
-  const create = `CREATE TABLE IF NOT EXISTS "${tableName}" (\n  ${[...colDefs, ...fkDefs].join(
-    ",\n  "
-  )}\n)`;
-  rawConn.exec(create);
+CREATE TABLE IF NOT EXISTS run_events (
+  id            text PRIMARY KEY,
+  run_id        text NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+  seq           integer NOT NULL,
+  ts            bigint NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint,
+  type          text NOT NULL,
+  node          text,
+  payload_json  text NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS run_events_run_id_idx     ON run_events (run_id);
+CREATE INDEX IF NOT EXISTS run_events_run_id_seq_idx ON run_events (run_id, seq);
 
-  // Add missing columns (additive only).
-  const existing = rawConn
-    .prepare(`PRAGMA table_info("${tableName}")`)
-    .all() as { name: string }[];
-  const have = new Set(existing.map((r) => r.name));
-  for (const col of cfg.columns) {
-    if (!have.has(col.name)) {
-      const ddl = columnDdl(col).replace(" PRIMARY KEY", ""); // can't add PK after the fact
-      rawConn.exec(`ALTER TABLE "${tableName}" ADD COLUMN ${ddl}`);
-    }
-  }
+CREATE TABLE IF NOT EXISTS endpoints (
+  id            text PRIMARY KEY,
+  display_name  text NOT NULL,
+  base_url      text NOT NULL,
+  api_key       text,
+  created_at    bigint NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint,
+  updated_at    bigint NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint
+);
 
-  // Indexes.
-  for (const idx of extractIndexes(cfg.indexes)) {
-    const u = idx.unique ? "UNIQUE " : "";
-    const cols = idx.columns.map((c) => `"${c}"`).join(", ");
-    rawConn.exec(
-      `CREATE ${u}INDEX IF NOT EXISTS "${idx.name}" ON "${tableName}" (${cols})`
-    );
-  }
-}
+CREATE TABLE IF NOT EXISTS artifacts (
+  id            text PRIMARY KEY,
+  run_id        text NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+  seq           integer NOT NULL,
+  name          text NOT NULL,
+  kind          text NOT NULL,
+  mime          text NOT NULL,
+  bytes         bigint NOT NULL DEFAULT 0,
+  content_text  text,
+  content_path  text,
+  created_at    bigint NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint
+);
+CREATE INDEX IF NOT EXISTS artifacts_run_id_idx     ON artifacts (run_id);
+CREATE INDEX IF NOT EXISTS artifacts_run_id_seq_idx ON artifacts (run_id, seq);
+`;
 
-// One-time pre-sync renames for the tools→agents terminology shift. Idempotent:
-// runs only when the legacy table/column exists and the new one does not.
-function preSyncRenames(): void {
-  const tables = rawConn
-    .prepare("SELECT name FROM sqlite_master WHERE type='table'")
-    .all() as { name: string }[];
-  const have = new Set(tables.map((t) => t.name));
-  if (have.has("tools") && !have.has("agents")) {
-    rawConn.exec(`ALTER TABLE "tools" RENAME TO "agents"`);
-  }
-  if (have.has("runs")) {
-    const cols = rawConn.prepare(`PRAGMA table_info("runs")`).all() as { name: string }[];
-    const colSet = new Set(cols.map((c) => c.name));
-    if (colSet.has("tool_id") && !colSet.has("agent_id")) {
-      rawConn.exec(`ALTER TABLE "runs" RENAME COLUMN "tool_id" TO "agent_id"`);
-    }
-  }
-  // Drop the obsolete index name; the new sync will recreate "runs_agent_id_idx".
-  rawConn.exec(`DROP INDEX IF EXISTS "runs_tool_id_idx"`);
-}
+const TABLE_NAMES = [
+  "conversations",
+  "messages",
+  "scheduled_tasks",
+  "agents",
+  "runs",
+  "run_events",
+  "endpoints",
+  "artifacts"
+];
 
-export function migrate(): void {
-  const tables: SQLiteTable[] = (Object.values(schema) as unknown[]).filter(
-    (v): v is SQLiteTable => v instanceof SQLiteTable
-  );
-
-  rawConn.exec("BEGIN");
+export async function migrate(): Promise<void> {
+  const client = await pool.connect();
   try {
-    preSyncRenames();
-    for (const t of tables) syncTable(t);
-    rawConn.exec("COMMIT");
+    await client.query("BEGIN");
+    await client.query(DDL);
+    await client.query("COMMIT");
   } catch (err) {
-    rawConn.exec("ROLLBACK");
+    await client.query("ROLLBACK").catch(() => {});
     throw err;
+  } finally {
+    client.release();
   }
 
-  console.log(`[db] sync complete (${config.driver}, ${tables.length} tables)`);
+  // Print a redacted version of the connection target so secrets don't leak
+  // into logs but the operator can confirm which DB they're hitting.
+  const target = (() => {
+    try {
+      const u = new URL(config.url);
+      return `${u.hostname}:${u.port || "5432"}${u.pathname}`;
+    } catch {
+      return "(unparseable)";
+    }
+  })();
+  console.log(`[db] sync complete (postgres @ ${target}, ${TABLE_NAMES.length} tables)`);
 }

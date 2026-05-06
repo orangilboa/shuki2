@@ -18,8 +18,8 @@ import type { Agent, RunningTask, ScheduledTask } from "../types/index.js";
 // ---------- /api/scheduled -----------------------------------------------
 
 export const scheduledRouter: Router = Router();
-scheduledRouter.get("/", (_req: Request, res: Response) => {
-  const rows = db.select().from(scheduledTasks).all();
+scheduledRouter.get("/", async (_req: Request, res: Response) => {
+  const rows = await db.select().from(scheduledTasks);
   const out: ScheduledTask[] = rows.map((r) => ({
     id: r.id,
     name: r.name,
@@ -34,13 +34,13 @@ scheduledRouter.get("/", (_req: Request, res: Response) => {
 
 export const agentsRouter: Router = Router();
 
-agentsRouter.get("/", (_req: Request, res: Response) => {
-  const out: Agent[] = listAllAgents();
+agentsRouter.get("/", async (_req: Request, res: Response) => {
+  const out: Agent[] = await listAllAgents();
   res.json(out);
 });
 
-agentsRouter.get("/:id", (req: Request, res: Response) => {
-  const agent = findAgentById(req.params.id);
+agentsRouter.get("/:id", async (req: Request, res: Response) => {
+  const agent = await findAgentById((req.params.id as string));
   if (!agent) {
     res.status(404).json({ error: "not_found" });
     return;
@@ -48,7 +48,7 @@ agentsRouter.get("/:id", (req: Request, res: Response) => {
   res.json(agent);
 });
 
-agentsRouter.post("/", (req: Request, res: Response) => {
+agentsRouter.post("/", async (req: Request, res: Response) => {
   const body = (req.body ?? {}) as Record<string, unknown>;
   if (typeof body.name !== "string" || body.name.trim().length === 0) {
     res.status(400).json({ error: "invalid_name" });
@@ -76,7 +76,7 @@ agentsRouter.post("/", (req: Request, res: Response) => {
   try {
     const inputs = validateAgentInputs(body.inputs);
     const exec = validateAgentExec(body.exec);
-    const created = createUserAgent({ name: body.name, description, model, inputs, exec });
+    const created = await createUserAgent({ name: body.name, description, model, inputs, exec });
     res.json(created);
   } catch (err) {
     if (err instanceof AgentSpecError) {
@@ -87,13 +87,13 @@ agentsRouter.post("/", (req: Request, res: Response) => {
   }
 });
 
-agentsRouter.patch("/:id", (req: Request, res: Response) => {
-  const id = req.params.id;
+agentsRouter.patch("/:id", async (req: Request, res: Response) => {
+  const id = (req.params.id as string);
   if (isConfigAgent(id)) {
     res.status(403).json({ error: "config_agents_are_read_only" });
     return;
   }
-  const existing = findAgentById(id);
+  const existing = await findAgentById(id);
   if (!existing) {
     res.status(404).json({ error: "not_found" });
     return;
@@ -140,7 +140,7 @@ agentsRouter.patch("/:id", (req: Request, res: Response) => {
     }
     throw err;
   }
-  const updated = updateUserAgent(id, patch);
+  const updated = await updateUserAgent(id, patch);
   if (!updated) {
     res.status(404).json({ error: "not_found" });
     return;
@@ -148,13 +148,13 @@ agentsRouter.patch("/:id", (req: Request, res: Response) => {
   res.json(updated);
 });
 
-agentsRouter.delete("/:id", (req: Request, res: Response) => {
-  const id = req.params.id;
+agentsRouter.delete("/:id", async (req: Request, res: Response) => {
+  const id = (req.params.id as string);
   if (isConfigAgent(id)) {
     res.status(403).json({ error: "config_agents_are_read_only" });
     return;
   }
-  const ok = deleteUserAgent(id);
+  const ok = await deleteUserAgent(id);
   if (!ok) {
     res.status(404).json({ error: "not_found" });
     return;
@@ -162,8 +162,8 @@ agentsRouter.delete("/:id", (req: Request, res: Response) => {
   res.status(204).end();
 });
 
-agentsRouter.post("/:id/run", (req: Request, res: Response) => {
-  const agent = findAgentById(req.params.id);
+agentsRouter.post("/:id/run", async (req: Request, res: Response) => {
+  const agent = await findAgentById((req.params.id as string));
   if (!agent) {
     res.status(404).json({ error: "not_found" });
     return;
@@ -185,24 +185,22 @@ agentsRouter.post("/:id/run", (req: Request, res: Response) => {
 
   // Config-file agents aren't in the DB; ensure a shadow row so the
   // `runs.agent_id` FK can be satisfied. Idempotent.
-  if (agent.source === "config") ensureConfigAgentShadow(agent.id);
+  if (agent.source === "config") await ensureConfigAgentShadow(agent.id);
 
   const id = crypto.randomUUID();
   const now = Date.now();
   const suffix = agent.exec.kind === "subprocess" ? "subprocess" : "mock";
   const name = `${agent.name} (${suffix})`;
-  db.insert(runs)
-    .values({
-      id,
-      agentId: agent.id,
-      name,
-      status: "running",
-      progress: 0,
-      startedAt: now,
-      inputsJson: JSON.stringify(rawInputs ?? {}),
-      model
-    })
-    .run();
+  await db.insert(runs).values({
+    id,
+    agentId: agent.id,
+    name,
+    status: "running",
+    progress: 0,
+    startedAt: now,
+    inputsJson: JSON.stringify(rawInputs ?? {}),
+    model
+  });
 
   const task: RunningTask = {
     id,
@@ -226,8 +224,8 @@ agentsRouter.post("/:id/run", (req: Request, res: Response) => {
 // ---------- /api/running -------------------------------------------------
 
 export const runningRouter: Router = Router();
-runningRouter.get("/", (_req: Request, res: Response) => {
-  const rows = db
+runningRouter.get("/", async (_req: Request, res: Response) => {
+  const rows = await db
     .select({
       id: runs.id,
       agentId: runs.agentId,
@@ -239,8 +237,7 @@ runningRouter.get("/", (_req: Request, res: Response) => {
     })
     .from(runs)
     .leftJoin(agents, eq(runs.agentId, agents.id))
-    .where(inArray(runs.status, ["queued", "running"]))
-    .all();
+    .where(inArray(runs.status, ["queued", "running"]));
 
   const out: RunningTask[] = rows.map((r) => ({
     id: r.id,

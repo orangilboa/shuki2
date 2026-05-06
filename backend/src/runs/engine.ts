@@ -87,7 +87,7 @@ export function startRun(
 
   const promise = (async () => {
     // Look up via the merged loader so config-file agents resolve too.
-    const agent = findAgentById(agentId);
+    const agent = await findAgentById(agentId);
     const agentName = agent?.name ?? "(unknown)";
     // Per-invocation override wins; fall back to the agent's configured model.
     const model = opts.model ?? agent?.model ?? null;
@@ -168,17 +168,17 @@ export function startRun(
           node,
           payload: { index: i, progress }
         });
-        db.update(runs)
+        await db
+          .update(runs)
           .set({ progress, status: "running" })
-          .where(eq(runs.id, runId))
-          .run();
+          .where(eq(runs.id, runId));
       }
 
       const finishedAt = Date.now();
-      db.update(runs)
+      await db
+        .update(runs)
         .set({ status: "succeeded", progress: 1, finishedAt })
-        .where(eq(runs.id, runId))
-        .run();
+        .where(eq(runs.id, runId));
 
       publish(runId, {
         type: "done",
@@ -196,10 +196,10 @@ export function startRun(
           ? err.message
           : String(err);
 
-      db.update(runs)
+      await db
+        .update(runs)
         .set({ status: "failed", finishedAt, error: errorText })
-        .where(eq(runs.id, runId))
-        .run();
+        .where(eq(runs.id, runId));
 
       publish(runId, {
         type: "error",

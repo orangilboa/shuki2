@@ -70,36 +70,38 @@ function byDisplayName<T extends { displayName: string }>(a: T, b: T): number {
   return a.displayName.localeCompare(b.displayName);
 }
 
-export function listAll(): EndpointSummary[] {
+export async function listAll(): Promise<EndpointSummary[]> {
   const config = getConfigEndpoints().map(configToSummary).sort(byDisplayName);
-  const userRows = db
+  const userRows = await db
     .select()
     .from(endpointsTable)
-    .orderBy(asc(endpointsTable.displayName))
-    .all();
+    .orderBy(asc(endpointsTable.displayName));
   const user = userRows.map(userToSummary).sort(byDisplayName);
   return [...config, ...user];
 }
 
-export function listAllResolved(): ResolvedEndpoint[] {
+export async function listAllResolved(): Promise<ResolvedEndpoint[]> {
   const config = getConfigEndpoints().map(configToResolved).sort(byDisplayName);
-  const userRows = db
+  const userRows = await db
     .select()
     .from(endpointsTable)
-    .orderBy(asc(endpointsTable.displayName))
-    .all();
+    .orderBy(asc(endpointsTable.displayName));
   const user = userRows.map(userToResolved).sort(byDisplayName);
   return [...config, ...user];
 }
 
-export function findById(id: string): {
+export async function findById(id: string): Promise<{
   source: "config" | "user";
   config?: ConfigEndpoint;
   user?: Endpoint;
-} | null {
+} | null> {
   const cfg = getConfigEndpoints().find((c) => c.id === id);
   if (cfg) return { source: "config", config: cfg };
-  const row = db.select().from(endpointsTable).where(eq(endpointsTable.id, id)).get();
+  const rows = await db
+    .select()
+    .from(endpointsTable)
+    .where(eq(endpointsTable.id, id));
+  const row = rows[0];
   if (row) return { source: "user", user: row };
   return null;
 }
@@ -110,26 +112,26 @@ export type CreateUserEndpointInput = {
   apiKey?: string | null;
 };
 
-export function createUserEndpoint(input: CreateUserEndpointInput): EndpointSummary {
+export async function createUserEndpoint(
+  input: CreateUserEndpointInput
+): Promise<EndpointSummary> {
   const id = crypto.randomUUID();
   const now = Date.now();
   // SECURITY: api_key persisted plaintext for local scaffold.
   // Encrypt at rest before shipping multi-user.
-  db.insert(endpointsTable)
-    .values({
-      id,
-      displayName: input.displayName,
-      baseUrl: input.baseUrl,
-      apiKey: input.apiKey ?? null,
-      createdAt: now,
-      updatedAt: now
-    })
-    .run();
-  const row = db
+  await db.insert(endpointsTable).values({
+    id,
+    displayName: input.displayName,
+    baseUrl: input.baseUrl,
+    apiKey: input.apiKey ?? null,
+    createdAt: now,
+    updatedAt: now
+  });
+  const rows = await db
     .select()
     .from(endpointsTable)
-    .where(eq(endpointsTable.id, id))
-    .get();
+    .where(eq(endpointsTable.id, id));
+  const row = rows[0];
   if (!row) throw new Error("[endpoints/store] insert vanished");
   return userToSummary(row);
 }
@@ -141,39 +143,37 @@ export type PatchUserEndpointInput = {
   apiKey?: string | null;
 };
 
-export function updateUserEndpoint(
+export async function updateUserEndpoint(
   id: string,
   patch: PatchUserEndpointInput
-): EndpointSummary | null {
-  const existing = db
+): Promise<EndpointSummary | null> {
+  const existingRows = await db
     .select()
     .from(endpointsTable)
-    .where(eq(endpointsTable.id, id))
-    .get();
-  if (!existing) return null;
+    .where(eq(endpointsTable.id, id));
+  if (existingRows.length === 0) return null;
 
   const next: Partial<Endpoint> = { updatedAt: Date.now() };
   if (patch.displayName !== undefined) next.displayName = patch.displayName;
   if (patch.baseUrl !== undefined) next.baseUrl = patch.baseUrl;
   if (patch.apiKey !== undefined) next.apiKey = patch.apiKey;
 
-  db.update(endpointsTable).set(next).where(eq(endpointsTable.id, id)).run();
-  const after = db
+  await db.update(endpointsTable).set(next).where(eq(endpointsTable.id, id));
+  const afterRows = await db
     .select()
     .from(endpointsTable)
-    .where(eq(endpointsTable.id, id))
-    .get();
+    .where(eq(endpointsTable.id, id));
+  const after = afterRows[0];
   if (!after) return null;
   return userToSummary(after);
 }
 
-export function deleteUserEndpoint(id: string): boolean {
-  const existing = db
+export async function deleteUserEndpoint(id: string): Promise<boolean> {
+  const existingRows = await db
     .select()
     .from(endpointsTable)
-    .where(eq(endpointsTable.id, id))
-    .get();
-  if (!existing) return false;
-  db.delete(endpointsTable).where(eq(endpointsTable.id, id)).run();
+    .where(eq(endpointsTable.id, id));
+  if (existingRows.length === 0) return false;
+  await db.delete(endpointsTable).where(eq(endpointsTable.id, id));
   return true;
 }

@@ -17,7 +17,7 @@ import { eq } from "drizzle-orm";
 import { db } from "../../db/client.js";
 import { runs } from "../../db/schema.js";
 import type { AgentExec, AgentInput } from "../../types/index.js";
-import { publish } from "../bus.js";
+import { flush, publish } from "../bus.js";
 import { persistArtifact, type RawArtifactPayload } from "../artifacts.js";
 import type { RunEventType } from "../events.js";
 import type { Readable } from "node:stream";
@@ -49,7 +49,7 @@ export type RunSubprocessArgs = {
 /**
  * Resolve the absolute path of the repo's `agents/` directory.
  *
- * Assumption: backend runs with cwd=`backend/` (true for `npm run dev`,
+ * Assumption: backend runs with cwd=`backend/` (true for `pnpm dev`,
  * `npm start`, `tsx src/server.ts`). We resolve `..` from cwd. Falls back to
  * `<cwd>/agents` if `..` doesn't exist (e.g. running from repo root for tests).
  */
@@ -151,18 +151,22 @@ export async function runSubprocess(args: RunSubprocessArgs): Promise<void> {
   // `done` event below.
   let artifactQueue: Promise<void> = Promise.resolve();
 
-  function finalize(opts: { ok: boolean; code: number | null; errorText?: string }) {
+  async function finalize(opts: {
+    ok: boolean;
+    code: number | null;
+    errorText?: string;
+  }): Promise<void> {
     if (finalized) return;
     finalized = true;
     const finishedAt = Date.now();
-    db.update(runs)
+    await db
+      .update(runs)
       .set({
         status: opts.ok ? "succeeded" : "failed",
         finishedAt,
         ...(opts.errorText ? { error: opts.errorText } : {})
       })
-      .where(eq(runs.id, runId))
-      .run();
+      .where(eq(runs.id, runId));
   }
 
   function publishEvent(type: RunEventType, node: string | null, payload: unknown): void {
@@ -196,7 +200,7 @@ export async function runSubprocess(args: RunSubprocessArgs): Promise<void> {
     const msg = err instanceof Error ? err.message : String(err);
     publishEvent("error", null, { message: `spawn failed: ${msg}` });
     publishEvent("done", null, { ok: false, error: msg });
-    finalize({ ok: false, code: null, errorText: msg });
+    await finalize({ ok: false, code: null, errorText: msg });
     return;
   }
 
@@ -260,10 +264,18 @@ export async function runSubprocess(args: RunSubprocessArgs): Promise<void> {
             typeof (payload as { progress?: unknown }).progress === "number"
           ) {
             const progress = (payload as { progress: number }).progress;
-            db.update(runs)
+            // Fire-and-forget: progress updates are non-critical and we don't
+            // want to block the line-reader. Errors are logged and swallowed.
+            void db
+              .update(runs)
               .set({ progress, status: "running" })
               .where(eq(runs.id, runId))
-              .run();
+              .catch((err: unknown) => {
+                console.error(
+                  `[subprocess] progress update failed run=${runId}:`,
+                  err instanceof Error ? err.message : err
+                );
+              });
           }
         } else {
           // Unknown type → bundle into `custom`.
@@ -339,7 +351,11 @@ export async function runSubprocess(args: RunSubprocessArgs): Promise<void> {
         if (!doneEmitted) {
           publishEvent("done", null, { ok: false, error: "aborted", aborted: true });
         }
-        finalize({ ok: false, code: exitCode, errorText: "aborted" });
+        await finalize({ ok: false, code: exitCode, errorText: "aborted" });
+        // Wait for the bus to persist + fan out the terminal events before
+        // resolving; otherwise the engine promise can settle before
+        // subscribers have observed `done`.
+        await flush(runId);
         resolve();
         return;
       }
@@ -356,11 +372,12 @@ export async function runSubprocess(args: RunSubprocessArgs): Promise<void> {
           ...(sig ? { signal: sig } : {})
         });
       }
-      finalize({
+      await finalize({
         ok,
         code: exitCode,
         errorText: ok ? undefined : spawnErrText ?? `exited with code ${exitCode}`
       });
+      await flush(runId);
       resolve();
     });
   });

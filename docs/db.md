@@ -1,16 +1,16 @@
-# Database — schema, migrations, driver-pluggable design
+# Database — schema, migrations
 
-The backend uses Drizzle ORM with `better-sqlite3` today. Everything is shaped to be portable to Postgres later via a driver swap and a parallel `pg-core` schema file.
+The backend uses Drizzle ORM on top of `pg` (node-postgres). Postgres is the only supported driver; there is no SQLite fallback.
 
 ## Stack
 
-- ORM: [`drizzle-orm`](https://orm.drizzle.team/) — schema-first, lightweight, types inferred from the schema.
-- Driver: [`better-sqlite3`](https://github.com/WiseLibs/better-sqlite3) — sync API, fast, single-file. WAL is enabled.
-- File: `backend/data/openshuki.db` (created at runtime, gitignored).
+- ORM: [`drizzle-orm`](https://orm.drizzle.team/) — schema-first, lightweight, types inferred from the schema (`pg-core` dialect).
+- Driver: [`pg`](https://node-postgres.com/) — pure JS, async via `pg.Pool`. No native build step.
+- Connection: configured via `DB_URL` (default `postgresql://openshuki:openshuki@localhost:5432/openshuki`).
 
 ## Tables
 
-All tables defined in `backend/src/db/schema.ts`. Timestamps are `integer` columns storing unix milliseconds (portable to Postgres `bigint` or `timestamptz` later — the conversion is a one-time backfill).
+All tables defined in `backend/src/db/schema.ts`. Timestamps are `bigint` columns storing unix milliseconds, decoded as JS `number` via `bigint({ mode: "number" })`. JSON-shaped columns are stored as `text` and JSON.stringify/parse'd at the edges (kept this way to minimize call-site churn during the SQLite→Postgres swap; revisit `jsonb` later if it matters).
 
 | Table | Purpose | Key columns |
 |---|---|---|
@@ -30,23 +30,23 @@ Indexes:
 - `run_events.run_id`, composite `(run_id, seq)`
 - `artifacts.run_id`, composite `(run_id, seq)`
 
-## Migration policy — additive only
+## Migration policy — idempotent DDL only
 
-`backend/src/db/migrate.ts` runs at startup. It:
+`backend/src/db/migrate.ts` runs at startup. It contains a hand-written DDL script — `CREATE TABLE IF NOT EXISTS` and `CREATE INDEX IF NOT EXISTS` for every table — wrapped in a transaction. It does *not*:
 
-- Creates missing tables (`CREATE TABLE IF NOT EXISTS` from Drizzle's `getTableConfig`).
-- Adds missing columns (`PRAGMA table_info` diff → `ALTER TABLE … ADD COLUMN`).
-- Creates missing indexes (`CREATE INDEX IF NOT EXISTS`).
-
-It does *not*:
-
-- Drop columns, indexes, or tables.
+- Drop tables, columns, or indexes.
 - Change column types, nullability, or defaults.
-- Reorder rows, recompute generated values, or rewrite data.
+- Reorder rows or rewrite data.
 
-Why additive only: SQLite's `ALTER COLUMN` story is poor (you'd need a full table rebuild), and the extra surface isn't worth the risk for a local-dev scaffold. If you really need a destructive change, do it manually (`sqlite3 data/openshuki.db ".dump" | …`) or delete the DB.
+Why hand-written DDL instead of drizzle-kit migrations: this scaffold runs in closed-network environments where generating migration files at deploy time is friction. The DDL script is small (~60 lines), readable, and matches the schema 1:1. If you reach the point where production migrations matter, graduate to drizzle-kit.
 
-The boot log line `[db] sync complete (sqlite, N tables)` is the visible signal that migration ran. `N` should match the count in this doc — if it doesn't, something didn't load.
+To add a column or table:
+
+1. Edit `backend/src/db/schema.ts` (drives the TypeScript types).
+2. Edit `backend/src/db/migrate.ts` to add the matching DDL with `IF NOT EXISTS`.
+3. Restart the backend — boot prints `[db] sync complete (postgres @ host:port/db, N tables)`.
+
+For destructive changes (drop a column, change a type, rename), apply them in `psql` directly. Then update both files to reflect the new state.
 
 ## Inferred types
 
@@ -59,33 +59,14 @@ export type NewConversation = typeof conversations.$inferInsert;
 
 Use these in `store.ts` and route handlers. The route layer maps DB rows to API response shapes (e.g. unix-ms → ISO strings) — don't expose raw DB shapes through the API.
 
-## Driver-pluggable design
+## Async everywhere
 
-The selection happens in `backend/src/db/client.ts`:
-
-```ts
-switch (config.driver) {
-  case "sqlite":   return buildSqlite(cfg);
-  case "postgres": throw new Error("not_implemented");
-}
-```
-
-To add Postgres:
-
-1. Install `drizzle-orm/node-postgres` + `pg`.
-2. Add a parallel `schema.pg.ts` using `drizzle-orm/pg-core` (or unify via a shared schema-builder if the columns line up — they will, with `bigint` for unix-ms or a one-shot conversion to `timestamptz`).
-3. Implement the `postgres` branch in `buildPostgres()` returning the same `{ db, rawConn }` shape.
-4. Wire env: `DB_DRIVER=postgres`, `DB_URL=postgres://…`.
-5. Port `migrate.ts` — Postgres has real ALTERs, so the additive-only constraint can relax (or graduate to drizzle-kit migrations).
-
-The rest of the app code (`store.ts` files, runners, routes) doesn't change — they only see Drizzle's typed query builder.
-
-For a step-by-step walkthrough see [postgres.md](postgres.md).
+Drizzle on `pg` is async. Every store function returns `Promise<...>`. Routes are `async` handlers. The bus `publish()` is a special case — it returns the envelope synchronously (so callers like `persistArtifact` can use the assigned `seq` immediately) but enqueues the actual `INSERT INTO run_events` plus listener fan-out on a per-run promise chain. See [../backend/src/runs/bus.ts](../backend/src/runs/bus.ts) for the queue model and `flush(runId)` helper.
 
 ## Common gotchas
 
-- **`runs.agent_id` FK has no `ON DELETE`.** Deleting an agent that has run history fails the FK. The user-agent delete path in `backend/src/agents/store.ts` removes dependent runs first; downstream `run_events` and `artifacts` cascade because their FKs declare it.
-- **Config agents need a shadow DB row** to satisfy `runs.agent_id`. `ensureConfigAgentShadow(id)` is idempotent and inserts a minimal row with the same id. The merged listing API never serves the shadow (config wins by id).
+- **`runs.agent_id` FK has no `ON DELETE`.** Postgres enforces this strictly — deleting an agent that has run history fails the FK. The user-agent delete path in `backend/src/agents/store.ts` removes dependent runs first; downstream `run_events` and `artifacts` cascade because their FKs declare it.
+- **Config agents need a shadow DB row** to satisfy `runs.agent_id`. `ensureConfigAgentShadow(id)` is idempotent (uses `INSERT … ON CONFLICT DO NOTHING`) and inserts a minimal row with the same id. The merged listing API never serves the shadow (config wins by id).
 - **`run_events.seq` and `artifacts.seq` share the same per-run counter.** Artifact rows reuse the seq from their corresponding `artifact` event. Don't introduce a separate counter.
-- **WAL mode is on.** This means there are `openshuki.db-wal` and `openshuki.db-shm` files alongside the main DB. Don't `rm` only the `.db` and expect a clean state — wipe all three or run `rawConn.exec("PRAGMA wal_checkpoint(TRUNCATE)")` first.
-- **`crypto.randomUUID()` runs in the schema's `$defaultFn`.** Drizzle calls it at insert time, not at migration time. Postgres can do this server-side with `gen_random_uuid()` once you switch.
+- **Mid-run process restarts are not supported.** The bus's per-run `nextSeq` counter lives in memory; restarting while a run is active and continuing to publish would collide with already-persisted rows. In practice the engine never resumes a run from the DB, so this is theoretical — but if you change that, swap the in-memory counter for a Postgres `SEQUENCE`.
+- **`crypto.randomUUID()` runs in the schema's `$defaultFn`.** Drizzle calls it at insert time. If you want server-side UUIDs, switch to `gen_random_uuid()` (requires the `pgcrypto` extension).

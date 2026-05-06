@@ -40,12 +40,12 @@ function rowToSummary(r: Artifact): ArtifactSummary {
 export const artifactsRouter: Router = Router();
 
 // GET /api/artifacts/:id
-artifactsRouter.get("/:id", (req: Request, res: Response) => {
-  const row = db
+artifactsRouter.get("/:id", async (req: Request, res: Response) => {
+  const rows = await db
     .select()
     .from(artifacts)
-    .where(eq(artifacts.id, req.params.id))
-    .get();
+    .where(eq(artifacts.id, (req.params.id as string)));
+  const row = rows[0];
   if (!row) {
     res.status(404).json({ error: "not_found" });
     return;
@@ -55,11 +55,11 @@ artifactsRouter.get("/:id", (req: Request, res: Response) => {
 
 // GET /api/artifacts/:id/content
 artifactsRouter.get("/:id/content", async (req: Request, res: Response) => {
-  const row = db
+  const rows = await db
     .select()
     .from(artifacts)
-    .where(eq(artifacts.id, req.params.id))
-    .get();
+    .where(eq(artifacts.id, (req.params.id as string)));
+  const row = rows[0];
   if (!row) {
     res.status(404).json({ error: "not_found" });
     return;
@@ -122,18 +122,20 @@ artifactsRouter.get("/:id/content", async (req: Request, res: Response) => {
  * Sub-route handler for GET /api/runs/:runId/artifacts.
  * Mounted from the runs router so the runId param is in scope.
  */
-export function listArtifactsForRun(req: Request, res: Response): void {
-  const runId = req.params.id;
-  const exists = db.select({ id: runs.id }).from(runs).where(eq(runs.id, runId)).get();
-  if (!exists) {
+export async function listArtifactsForRun(req: Request, res: Response): Promise<void> {
+  const runId = (req.params.id as string);
+  const existsRows = await db
+    .select({ id: runs.id })
+    .from(runs)
+    .where(eq(runs.id, runId));
+  if (existsRows.length === 0) {
     res.status(404).json({ error: "not_found" });
     return;
   }
-  const rows = db
+  const rows = await db
     .select()
     .from(artifacts)
     .where(eq(artifacts.runId, runId))
-    .orderBy(asc(artifacts.seq))
-    .all();
+    .orderBy(asc(artifacts.seq));
   res.json(rows.map(rowToSummary));
 }
