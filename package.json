@@ -5,13 +5,14 @@
   "private": true,
   "packageManager": "pnpm@10.33.4",
   "scripts": {
-    "install:all": "pnpm install -r",
-    "dev": "concurrently \"pnpm --filter backend dev\" \"pnpm --filter frontend dev\"",
-    "dev:backend": "pnpm --filter backend dev",
-    "dev:frontend": "pnpm --filter frontend dev",
-    "build:backend": "pnpm --filter backend build",
-    "build:frontend": "pnpm --filter frontend build",
-    "agents:install": "pnpm --filter agents install && pnpm --filter agents exec pip install -r requirements.txt"
+    "install:all": "node scripts/ensure-venv.mjs && pnpm install -r",
+    "dev": "concurrently -n backend,frontend -c cyan,magenta \"cd backend && pnpm dev\" \"cd frontend && pnpm dev\"",
+    "dev:backend": "concurrently -n backend -c cyan \"cd backend && pnpm dev\"",
+    "dev:frontend": "concurrently -n frontend -c magenta \"cd frontend && pnpm dev\"",
+    "build:backend": "concurrently -n backend -c cyan \"cd backend && pnpm build\"",
+    "build:frontend": "concurrently -n frontend -c magenta \"cd frontend && pnpm build\"",
+    "agents:install": "concurrently -n agents -c yellow \"cd agents && pnpm install && pip install -r requirements.txt\"",
+    "clean": "node scripts/clean.mjs"
   },
   "devDependencies": {
     "concurrently": "^9.2.1"
