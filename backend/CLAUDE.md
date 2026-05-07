@@ -25,8 +25,10 @@ src/
     bus.ts                     In-process pub/sub keyed by runId, persists every event to run_events.
     engine.ts                  startRun(): publishes run_started, routes by exec.kind.
     artifacts.ts               persistArtifact(): name sanitisation, file copy, mime defaults, DB insert.
+    interactions/
+      store.ts                 agent_interactions CRUD + per-run stdin writer registry (ask_user/user_response).
     runners/
-      subprocess.ts            Spawns child, line-buffers stdout/stderr, translates JSONL → bus.
+      subprocess.ts            Spawns child, line-buffers stdout/stderr, translates JSONL → bus. stdin is piped so user answers can be delivered back.
   routes/
     conversations.ts           /api/conversations CRUD + /:id/messages.
     agents.ts                  /api/agents CRUD + /:id/run dispatch + /api/scheduled, /api/running.
@@ -52,6 +54,8 @@ data/                          Created at runtime. Holds artifacts/<runId>/<file
 - `GET/POST/PATCH/DELETE /api/endpoints[/:id]`
 - `GET /api/models[?refresh=1]` (cached 60s aggregator)
 - `GET /api/runs/:runId/artifacts`, `GET /api/artifacts/:id`, `GET /api/artifacts/:id/content`
+- `GET /api/runs/:runId/interactions[?status=pending|answered|cancelled]`, `POST /api/runs/:runId/interactions/:interactionId/respond`
+- `GET /api/interactions/pending` (cross-run; used by the right-panel badges)
 - `GET /api/health`
 
 ## Patterns to follow
@@ -79,6 +83,10 @@ The `Agent` catalog adds an extra wrinkle (`ensureConfigAgentShadow` inserts a m
 The bus's `publish(runId, partial)` assigns a monotonic per-run `seq` synchronously and returns the envelope; persistence + fan-out are chained on a per-run promise queue (so callers don't await, but events still land in seq order). For correctness during run shutdown, the subprocess runner calls `await flush(runId)` before resolving — that drains the queue so terminal `done` is observable. Frontends subscribe via SSE; the per-run handler in `routes/runs.ts` subscribes BEFORE replaying to avoid a race where async DB writes haven't landed yet when replay queries.
 
 If you add a new event type, update **`runs/events.ts`** AND **`runs/runners/subprocess.ts`'s `KNOWN_EVENT_TYPES` set**, AND `frontend/src/types/index.ts`. See [../docs/protocol.md](../docs/protocol.md) for the full vocabulary.
+
+### Agent ↔ user interactions
+
+When an agent emits an `ask_user` event, the subprocess runner persists a row in `agent_interactions` (status `pending`) and registers a stdin writer for the run. `POST /api/runs/:id/interactions/:interactionId/respond` updates the row to `answered`, calls the registered writer (which writes a `user_response` JSONL line on the child's stdin), and publishes a `user_response` event on the bus so the UI updates without an extra round trip. On process exit, the runner unregisters the writer and flips any still-pending rows to `cancelled` via `cancelPendingForRun(runId)`.
 
 ### Subprocess runner
 

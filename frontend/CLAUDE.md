@@ -91,6 +91,10 @@ The right panel's "live" indicator and progress bars are updated by `ingestEvent
 
 When you add a new event type that should appear in the right-panel's last-event line: extend the `eventLine()` switch in `RightPanel.tsx`. For artifact-driven UI: artifact events arrive on the firehose with full metadata in `payload`, and `ingestEvent` synthesises an `ArtifactSummary` and pushes into `artifactsByRun` — no extra fetch needed.
 
+### Agent ↔ user questions
+
+Agents can pause and ask the user a question. The wire events are `ask_user` (from agent) and `user_response` (from backend after the user submits). `ingestEvent` synthesises a pending `AgentInteraction` from each `ask_user` and clears it on `user_response`; `RunView` renders the inline answer form for any pending interaction in the run's event log, and `RightPanel` shows badges for runs with at least one pending question (plus a count badge on the collapse toggle when collapsed). Use `useStore.submitInteractionResponse(runId, interactionId, answer)` to send the user's reply.
+
 ## Constraints
 
 - Strict TS, no `any` in props, store, or API surface.

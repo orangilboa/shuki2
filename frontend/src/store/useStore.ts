@@ -3,8 +3,10 @@ import { api } from "../api/client";
 import type { AgentCreateInput, AgentPatchInput } from "../api/client";
 import type {
   Agent,
+  AgentInteraction,
   ArtifactEventPayload,
   ArtifactSummary,
+  AskUserEventPayload,
   CenterView,
   ChatMessage,
   Conversation,
@@ -14,7 +16,8 @@ import type {
   ModelsResponse,
   RunEventEnvelope,
   RunningTask,
-  ScheduledTask
+  ScheduledTask,
+  UserResponseEventPayload
 } from "../types";
 
 type State = {
@@ -40,6 +43,15 @@ type State = {
   // artifacts
   artifactsByRun: Record<string, ArtifactSummary[]>;
   artifactsLoading: Record<string, boolean>;
+
+  // interactions (agent ↔ user Q&A)
+  pendingInteractionsByRun: Record<string, AgentInteraction[]>;
+  // interactionId → answer string. Lets RunView render resolved Q&A inline
+  // for events received over SSE without an extra fetch.
+  answeredInteractions: Record<string, string>;
+  // tracks which runs we've already seeded from /api/runs/:id/interactions
+  // so RunView doesn't re-fetch on every mount.
+  interactionsLoadedForRun: Record<string, boolean>;
 
   // endpoints / models
   endpoints: EndpointSummary[];
@@ -88,6 +100,14 @@ type State = {
   ingestEvent: (ev: RunEventEnvelope) => void;
 
   loadArtifacts: (runId: string) => Promise<void>;
+
+  loadPendingInteractions: () => Promise<void>;
+  loadInteractionsForRun: (runId: string) => Promise<void>;
+  submitInteractionResponse: (
+    runId: string,
+    interactionId: string,
+    answer: string
+  ) => Promise<void>;
 };
 
 export const useStore = create<State>((set, get) => ({
@@ -109,6 +129,10 @@ export const useStore = create<State>((set, get) => ({
 
   artifactsByRun: {},
   artifactsLoading: {},
+
+  pendingInteractionsByRun: {},
+  answeredInteractions: {},
+  interactionsLoadedForRun: {},
 
   endpoints: [],
   models: [],
@@ -280,11 +304,58 @@ export const useStore = create<State>((set, get) => ({
         }
       }
 
+      // Synthesize pending interactions from ask_user events; clear on
+      // user_response. Both arms keep answeredInteractions in sync so the
+      // event log can show resolved Q&A without an extra fetch.
+      let nextPending = s.pendingInteractionsByRun;
+      let nextAnswers = s.answeredInteractions;
+      if (ev.type === "ask_user" && ev.payload && typeof ev.payload === "object") {
+        const p = ev.payload as AskUserEventPayload;
+        if (typeof p.interactionId === "string" && p.interactionId.length > 0) {
+          const existing = s.pendingInteractionsByRun[ev.runId] ?? [];
+          if (!existing.some(i => i.id === p.interactionId)) {
+            const synth: AgentInteraction = {
+              id: p.interactionId,
+              runId: ev.runId,
+              prompt: p.prompt,
+              choices: p.choices ?? null,
+              status: "pending",
+              answer: null,
+              createdAt: new Date(ev.ts).toISOString(),
+              answeredAt: null
+            };
+            nextPending = {
+              ...s.pendingInteractionsByRun,
+              [ev.runId]: [...existing, synth]
+            };
+          }
+        }
+      } else if (
+        ev.type === "user_response" &&
+        ev.payload &&
+        typeof ev.payload === "object"
+      ) {
+        const p = ev.payload as UserResponseEventPayload;
+        if (typeof p.interactionId === "string" && typeof p.answer === "string") {
+          const existing = s.pendingInteractionsByRun[ev.runId] ?? [];
+          const filtered = existing.filter(i => i.id !== p.interactionId);
+          if (filtered.length !== existing.length) {
+            nextPending = {
+              ...s.pendingInteractionsByRun,
+              [ev.runId]: filtered
+            };
+          }
+          nextAnswers = { ...s.answeredInteractions, [p.interactionId]: p.answer };
+        }
+      }
+
       return {
         events: { ...s.events, [ev.runId]: nextBuf },
         latestEventByRun: { ...s.latestEventByRun, [ev.runId]: ev },
         running,
-        artifactsByRun: nextArtifactsByRun
+        artifactsByRun: nextArtifactsByRun,
+        pendingInteractionsByRun: nextPending,
+        answeredInteractions: nextAnswers
       };
     });
   },
@@ -308,6 +379,90 @@ export const useStore = create<State>((set, get) => ({
       });
     } catch {
       set(s => ({ artifactsLoading: { ...s.artifactsLoading, [runId]: false } }));
+    }
+  },
+
+  loadPendingInteractions: async () => {
+    const list = await api.listPendingInteractions();
+    set(s => {
+      // Group by run; keep any in-memory entries already synthesised from SSE
+      // events that aren't represented in the fetched list (rare but possible
+      // if the event arrived after the fetch was initiated).
+      const grouped: Record<string, AgentInteraction[]> = {
+        ...s.pendingInteractionsByRun
+      };
+      const seen = new Set<string>();
+      for (const i of list) {
+        seen.add(`${i.runId}:${i.id}`);
+      }
+      // For each run touched by the fetch, replace the pending list with the
+      // server's view (it's authoritative for status='pending').
+      const runIds = new Set(list.map(i => i.runId));
+      for (const runId of runIds) {
+        grouped[runId] = list.filter(i => i.runId === runId);
+      }
+      return { pendingInteractionsByRun: grouped };
+    });
+  },
+
+  loadInteractionsForRun: async runId => {
+    if (get().interactionsLoadedForRun[runId]) return;
+    const list = await api.listInteractions(runId);
+    set(s => {
+      const pending = list.filter(i => i.status === "pending");
+      const answers: Record<string, string> = { ...s.answeredInteractions };
+      for (const i of list) {
+        if (i.status === "answered" && typeof i.answer === "string") {
+          answers[i.id] = i.answer;
+        }
+      }
+      return {
+        pendingInteractionsByRun: {
+          ...s.pendingInteractionsByRun,
+          [runId]: pending
+        },
+        answeredInteractions: answers,
+        interactionsLoadedForRun: {
+          ...s.interactionsLoadedForRun,
+          [runId]: true
+        }
+      };
+    });
+  },
+
+  submitInteractionResponse: async (runId, interactionId, answer) => {
+    // Optimistically remove from pending so the inline form disappears
+    // immediately. The user_response SSE event will follow and write the
+    // answer into answeredInteractions.
+    set(s => {
+      const existing = s.pendingInteractionsByRun[runId] ?? [];
+      return {
+        pendingInteractionsByRun: {
+          ...s.pendingInteractionsByRun,
+          [runId]: existing.filter(i => i.id !== interactionId)
+        },
+        answeredInteractions: {
+          ...s.answeredInteractions,
+          [interactionId]: answer
+        }
+      };
+    });
+    try {
+      await api.respondToInteraction(runId, interactionId, answer);
+    } catch (err) {
+      // On failure, refetch the run's interactions so the UI reflects truth.
+      set(s => ({
+        interactionsLoadedForRun: {
+          ...s.interactionsLoadedForRun,
+          [runId]: false
+        }
+      }));
+      try {
+        await get().loadInteractionsForRun(runId);
+      } catch {
+        // best-effort
+      }
+      throw err;
     }
   }
 }));

@@ -2,9 +2,15 @@ import { Router, type Request, type Response } from "express";
 import { desc, eq } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { runs, agents } from "../db/schema.js";
-import { flush, replay, subscribe, subscribeAll } from "../runs/bus.js";
+import { flush, publish, replay, subscribe, subscribeAll } from "../runs/bus.js";
 import { cancelRun, isActive } from "../runs/engine.js";
 import type { RunEventEnvelope } from "../runs/events.js";
+import {
+  listAllPending as listAllPendingInteractions,
+  listByRun as listInteractionsByRun,
+  respondToInteraction
+} from "../runs/interactions/store.js";
+import type { AgentInteractionStatus } from "../types/index.js";
 import { listArtifactsForRun } from "./artifacts.js";
 
 const HEARTBEAT_MS = 15_000;
@@ -173,6 +179,61 @@ runsRouter.get("/:id/events", async (req: Request, res: Response) => {
 
 runsRouter.get("/:id/artifacts", listArtifactsForRun);
 
+// ---------- interactions (per-run list + answer) -------------------------
+
+runsRouter.get("/:id/interactions", async (req: Request, res: Response) => {
+  const runId = req.params.id as string;
+  const statusParam =
+    typeof req.query.status === "string" ? req.query.status : null;
+  let status: AgentInteractionStatus | undefined;
+  if (
+    statusParam === "pending" ||
+    statusParam === "answered" ||
+    statusParam === "cancelled"
+  ) {
+    status = statusParam;
+  }
+  const interactions = await listInteractionsByRun(runId, { status });
+  res.json(interactions);
+});
+
+runsRouter.post(
+  "/:id/interactions/:interactionId/respond",
+  async (req: Request, res: Response) => {
+    const runId = req.params.id as string;
+    const interactionId = req.params.interactionId as string;
+    const body = req.body as { answer?: unknown };
+    if (typeof body?.answer !== "string") {
+      res.status(400).json({ error: "answer_required" });
+      return;
+    }
+    const result = await respondToInteraction(
+      runId,
+      interactionId,
+      body.answer
+    );
+    if (result.kind === "not_found") {
+      res.status(404).json({ error: "not_found" });
+      return;
+    }
+    if (result.kind === "not_pending") {
+      res.status(409).json({ error: `interaction_${result.status}` });
+      return;
+    }
+    // Surface the answer on the run-event bus so the UI updates without an
+    // extra fetch (and so it appears in the persisted run_events history).
+    publish(runId, {
+      type: "user_response",
+      node: null,
+      payload: { interactionId, answer: body.answer }
+    });
+    res.json({
+      interaction: result.interaction,
+      delivered: result.delivered
+    });
+  }
+);
+
 // ---------- cancel -------------------------------------------------------
 
 runsRouter.post("/:id/cancel", async (req: Request, res: Response) => {
@@ -201,6 +262,15 @@ runsRouter.post("/:id/cancel", async (req: Request, res: Response) => {
     return;
   }
   res.json({ ok: true, mode: "noop", status: row.status });
+});
+
+// ---------- interactions firehose (mounted at /api/interactions) --------
+
+export const interactionsRouter: Router = Router();
+
+interactionsRouter.get("/pending", async (_req: Request, res: Response) => {
+  const list = await listAllPendingInteractions();
+  res.json(list);
 });
 
 // ---------- firehose handler (mounted at /api/events) -------------------

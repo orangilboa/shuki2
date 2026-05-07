@@ -115,3 +115,29 @@ export type ArtifactSummary = {
   hasInlineContent: boolean;
   createdAt: string; // ISO
 };
+
+// ---------- agent ↔ user interactions -----------------------------------
+
+export type AgentInteractionStatus = "pending" | "answered" | "cancelled";
+
+export type AgentInteraction = {
+  id: string;
+  runId: string;
+  prompt: string;
+  choices: string[] | null;
+  status: AgentInteractionStatus;
+  answer: string | null;
+  createdAt: string; // ISO
+  answeredAt: string | null; // ISO
+};
+
+export type AskUserEventPayload = {
+  interactionId: string;
+  prompt: string;
+  choices?: string[];
+};
+
+export type UserResponseEventPayload = {
+  interactionId: string;
+  answer: string;
+};

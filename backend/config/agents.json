@@ -71,6 +71,60 @@
         "cwd": "{AGENTS_DIR}",
         "protocol": "jsonl"
       }
+    },
+    {
+      "id": "quick-note",
+      "name": "Quick note",
+      "description": "Capture a quick note from the user (prompt + tag) and save it as a markdown artifact.",
+      "model": null,
+      "inputs": [
+        {
+          "name": "prefix",
+          "label": "Heading prefix",
+          "type": "string",
+          "default": "Note",
+          "description": "Label used in the note's heading (e.g. 'Note', 'Reminder', 'Idea')."
+        }
+      ],
+      "exec": {
+        "kind": "subprocess",
+        "command": "python",
+        "args": [
+          "-u",
+          "{AGENTS_DIR}/quick-note/main.py",
+          "--prefix",
+          "{prefix}"
+        ],
+        "cwd": "{AGENTS_DIR}/quick-note",
+        "protocol": "jsonl"
+      }
+    },
+    {
+      "id": "ask-demo",
+      "name": "Ask demo",
+      "description": "Minimal demo of the agent ↔ user Q&A channel: asks for your name and confirms how you'd like to be addressed.",
+      "model": null,
+      "inputs": [
+        {
+          "name": "greeting",
+          "label": "Greeting",
+          "type": "string",
+          "default": "Hi",
+          "description": "Opening word the agent uses (e.g. 'Hi', 'Hello', 'Greetings')."
+        }
+      ],
+      "exec": {
+        "kind": "subprocess",
+        "command": "python",
+        "args": [
+          "-u",
+          "{AGENTS_DIR}/ask-demo/main.py",
+          "--greeting",
+          "{greeting}"
+        ],
+        "cwd": "{AGENTS_DIR}/ask-demo",
+        "protocol": "jsonl"
+      }
     }
   ]
 }

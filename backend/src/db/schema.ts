@@ -218,3 +218,40 @@ export const artifacts = pgTable(
 
 export type Artifact = typeof artifacts.$inferSelect;
 export type NewArtifact = typeof artifacts.$inferInsert;
+
+// ---------- agent_interactions ------------------------------------------
+
+// A question the agent asked the user mid-run, plus the answer once given.
+// Lifecycle: created with status='pending'; transitions to 'answered' when
+// the user submits a response, or 'cancelled' if the run/process exits first.
+// `choices_json` is the optional list of suggested answers (UI may render
+// these as radios) — text-free-form answer is always allowed.
+export const agentInteractions = pgTable(
+  "agent_interactions",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    runId: text("run_id")
+      .notNull()
+      .references(() => runs.id, { onDelete: "cascade" }),
+    prompt: text("prompt").notNull(),
+    choicesJson: text("choices_json"),
+    status: text("status", {
+      enum: ["pending", "answered", "cancelled"]
+    }).notNull(),
+    answer: text("answer"),
+    createdAt: bigintN("created_at").notNull().default(nowMs),
+    answeredAt: bigintN("answered_at")
+  },
+  (t) => ({
+    runIdx: index("agent_interactions_run_id_idx").on(t.runId),
+    runStatusIdx: index("agent_interactions_run_id_status_idx").on(
+      t.runId,
+      t.status
+    )
+  })
+);
+
+export type AgentInteractionRow = typeof agentInteractions.$inferSelect;
+export type NewAgentInteractionRow = typeof agentInteractions.$inferInsert;

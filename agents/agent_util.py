@@ -17,8 +17,11 @@ Anything you `print()` outside these helpers becomes a `token` event.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import sys
+import threading
+import uuid
 from typing import Any
 
 # Force UTF-8 stdout so non-ASCII payloads (e.g. ° µ) round-trip safely on
@@ -127,3 +130,107 @@ def artifact_file(
     if mime is not None:
         payload["mime"] = mime
     emit("artifact", node=node, payload=payload)
+
+
+# ---------- ask_user (agent ↔ user Q&A) ---------------------------------
+#
+# When an agent needs input from the user it emits an `ask_user` event with
+# a fresh `interactionId` and then blocks reading stdin. The backend persists
+# the question to the `agent_interactions` table, surfaces it in the UI, and
+# once the user answers, writes a `{ "type": "user_response", "payload":
+# { "interactionId", "answer" } }` JSONL line back on this process's stdin.
+#
+# The reader runs in a background thread (started lazily on first call) and
+# routes each response to the matching `interactionId`. This lets multiple
+# concurrent questions resolve independently, in any order.
+
+
+_ASK_LOCK = threading.Lock()
+# interactionId -> Event signalling that the answer has arrived.
+_PENDING_EVENTS: dict[str, threading.Event] = {}
+_ANSWERS: dict[str, str] = {}
+_READER_THREAD: threading.Thread | None = None
+
+
+def _ensure_reader_started() -> None:
+    """Spin up the stdin reader thread on first ask_user call."""
+    global _READER_THREAD
+    with _ASK_LOCK:
+        if _READER_THREAD is not None and _READER_THREAD.is_alive():
+            return
+
+        def reader() -> None:
+            for raw_line in sys.stdin:
+                line = raw_line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except Exception:
+                    continue
+                if not isinstance(obj, dict):
+                    continue
+                if obj.get("type") != "user_response":
+                    continue
+                payload = obj.get("payload") or {}
+                interaction_id = payload.get("interactionId")
+                answer = payload.get("answer")
+                if not isinstance(interaction_id, str) or not isinstance(answer, str):
+                    continue
+                with _ASK_LOCK:
+                    _ANSWERS[interaction_id] = answer
+                    ev = _PENDING_EVENTS.pop(interaction_id, None)
+                if ev is not None:
+                    ev.set()
+
+        t = threading.Thread(target=reader, name="agent-stdin-reader", daemon=True)
+        t.start()
+        _READER_THREAD = t
+
+
+def ask_user(
+    prompt: str,
+    *,
+    choices: list[str] | None = None,
+    node: str | None = None,
+) -> str:
+    """Ask the user a question and block until they answer. Returns the
+    answer string.
+
+    This call is "asynchronous" with respect to the user — the run is paused
+    indefinitely from the agent's point of view — but the function itself is
+    synchronous (blocks the calling thread). For asyncio agents, see
+    `ask_user_async()`, which wraps this with `asyncio.to_thread`.
+
+    `choices` is an optional list of suggested answers; the UI may render
+    them as quick-select buttons. The user can always type a free-form
+    answer regardless.
+    """
+    _ensure_reader_started()
+    interaction_id = str(uuid.uuid4())
+    event = threading.Event()
+    with _ASK_LOCK:
+        _PENDING_EVENTS[interaction_id] = event
+
+    payload: dict[str, Any] = {"interactionId": interaction_id, "prompt": prompt}
+    if choices:
+        payload["choices"] = list(choices)
+    emit("ask_user", node=node, payload=payload)
+
+    event.wait()
+    with _ASK_LOCK:
+        return _ANSWERS.pop(interaction_id, "")
+
+
+async def ask_user_async(
+    prompt: str,
+    *,
+    choices: list[str] | None = None,
+    node: str | None = None,
+) -> str:
+    """Asyncio-compatible wrapper around `ask_user`.
+
+    Delegates to the same stdin reader (so calling both forms in one process
+    is fine) and yields control back to the event loop while waiting.
+    """
+    return await asyncio.to_thread(ask_user, prompt, choices=choices, node=node)
