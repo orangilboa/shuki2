@@ -72,6 +72,8 @@ Vocabulary (use the `agent_util` helpers — don't hand-format):
 | `tool_call` / `tool_result` | An LLM tool/function call inside the graph. Pair them. |
 | `custom` | Anything structured you want surfaced verbatim. |
 | `artifact` | A piece of output (md/text/image/audio/video) — see "Artifacts" below. |
+| `ask_user` | Pause the run to request input from the user. Use the `ask_user` / `askUser` helper — see "Asking the user" below. Payload `{ interactionId, prompt, choices? }`. |
+| `user_response` | Emitted by the **backend** (not by your agent) when the user answers. Payload `{ interactionId, answer }`. The matching JSONL line is also written to your stdin so the helper can resolve. |
 | `error` | A fatal error message. The backend will set the run to failed. |
 | `done` | Final event with `{ ok, ...summary }`. Optional — if you exit cleanly, the runner synthesises one. |
 
@@ -133,6 +135,33 @@ Constraints:
 - `image` / `audio` / `video` require a `path` (the runner won't accept inline binary).
 - `name` is sanitised to filesystem-safe characters; bad names fall back to `artifact-<seq>`.
 - Don't pass both `content` and `path` in the same event; one or the other.
+
+## Asking the user
+
+An agent can pause and request input from the user mid-run. The helper emits an `ask_user` event, blocks until the backend writes a matching `user_response` JSONL line back on stdin, then returns the answer string. The question is also persisted in the `agent_interactions` table so the UI can list outstanding prompts and badge the right panel.
+
+```python
+# Python — sync (matches existing demo style)
+from agent_util import ask_user
+name = ask_user("What is your name?", node="greet")
+choice = ask_user("Continue?", choices=["Yes", "No"], node="confirm")
+
+# Python — asyncio variant (delegates to the same stdin reader)
+from agent_util import ask_user_async
+name = await ask_user_async("What is your name?", node="greet")
+```
+
+```ts
+// TypeScript
+import { askUser } from "../agent_util.js";
+const name = await askUser("What is your name?", { node: "greet" });
+const choice = await askUser("Continue?", { choices: ["Yes", "No"], node: "confirm" });
+```
+
+Notes:
+- The helper generates an `interactionId` and embeds it in both the `ask_user` event and the expected `user_response` reply, so multiple concurrent questions resolve correctly regardless of the order the user answers them.
+- `choices` is a hint for the UI (it may render quick-select buttons). The user can always type a free-form answer.
+- If the run is cancelled or the process exits with a question still pending, the row's status is set to `cancelled` and your `ask_user` call may never return — make sure your top-level loop handles `KeyboardInterrupt` / unhandled rejections so the process can shut down cleanly.
 
 ## Adding a new agent — checklist
 

@@ -25,7 +25,9 @@ export type EventType =
   | "custom"
   | "error"
   | "done"
-  | "artifact";
+  | "artifact"
+  | "ask_user"
+  | "user_response";
 
 export type EventLine = {
   type: EventType;
@@ -124,4 +126,90 @@ export function artifactFile(
   const payload: Record<string, unknown> = { name, kind, path };
   if (opts.mime) payload.mime = opts.mime;
   emit({ type: "artifact", node: opts.node ?? null, payload });
+}
+
+// ---------- ask_user (agent ↔ user Q&A) ---------------------------------
+//
+// Emits an `ask_user` event and returns a promise that resolves with the
+// user's answer once the backend writes a `{ type: "user_response", payload:
+// { interactionId, answer } }` JSONL line back on this process's stdin.
+//
+// A single shared stdin reader is initialised lazily on the first call and
+// dispatches each response to the matching pending promise by interactionId,
+// so multiple concurrent questions are fine.
+
+import { randomUUID } from "node:crypto";
+
+type Resolver = (answer: string) => void;
+const pendingResolvers = new Map<string, Resolver>();
+let stdinReaderInitialised = false;
+
+function ensureStdinReader(): void {
+  if (stdinReaderInitialised) return;
+  stdinReaderInitialised = true;
+  process.stdin.setEncoding("utf8");
+  let buf = "";
+  process.stdin.on("data", (chunk: string) => {
+    buf += chunk;
+    let idx: number;
+    while ((idx = buf.indexOf("\n")) >= 0) {
+      const line = buf.slice(0, idx).replace(/\r$/, "");
+      buf = buf.slice(idx + 1);
+      if (line.length === 0) continue;
+      let obj: unknown;
+      try {
+        obj = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (
+        !obj ||
+        typeof obj !== "object" ||
+        (obj as { type?: unknown }).type !== "user_response"
+      ) {
+        continue;
+      }
+      const payload = (obj as { payload?: unknown }).payload;
+      if (!payload || typeof payload !== "object") continue;
+      const { interactionId, answer } = payload as {
+        interactionId?: unknown;
+        answer?: unknown;
+      };
+      if (typeof interactionId !== "string" || typeof answer !== "string") {
+        continue;
+      }
+      const resolver = pendingResolvers.get(interactionId);
+      if (resolver) {
+        pendingResolvers.delete(interactionId);
+        resolver(answer);
+      }
+    }
+  });
+  // We intentionally don't resume()/pause() — node 18+ keeps the readable
+  // open for as long as the process is running, which is exactly what we
+  // want for an agent that may issue multiple questions over its lifetime.
+  // If stdin closes (parent process gone) the loop simply stops firing.
+  process.stdin.on("error", () => {
+    // best-effort: parent dropped us, nothing to do
+  });
+}
+
+/**
+ * Ask the user a question and await their answer. The agent run pauses (from
+ * the user's perspective) until the answer comes back; the JS event loop
+ * keeps running, so other async work can continue if you want it to.
+ */
+export async function askUser(
+  prompt: string,
+  opts: { choices?: string[]; node?: string } = {}
+): Promise<string> {
+  ensureStdinReader();
+  const interactionId = randomUUID();
+  const promise = new Promise<string>((resolve) => {
+    pendingResolvers.set(interactionId, resolve);
+  });
+  const payload: Record<string, unknown> = { interactionId, prompt };
+  if (opts.choices && opts.choices.length > 0) payload.choices = opts.choices;
+  emit({ type: "ask_user", node: opts.node ?? null, payload });
+  return promise;
 }

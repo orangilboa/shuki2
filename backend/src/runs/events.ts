@@ -11,7 +11,12 @@ export type RunEventType =
   | "custom"
   | "error"
   | "done"
-  | "artifact";
+  | "artifact"
+  // Agent ↔ user Q&A. The agent emits `ask_user` to request input and the
+  // backend emits `user_response` once the user has answered. The matching
+  // identifier on both is `payload.interactionId`.
+  | "ask_user"
+  | "user_response";
 
 export type RunEventEnvelope<P = unknown> = {
   runId: string;

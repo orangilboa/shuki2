@@ -2,6 +2,7 @@ import type {
   Agent,
   AgentExec,
   AgentInput,
+  AgentInteraction,
   ArtifactSummary,
   Conversation,
   ConversationSummary,
@@ -153,5 +154,19 @@ export const api = {
   listArtifacts: (runId: string) =>
     j<ArtifactSummary[]>(fetch(`/api/runs/${runId}/artifacts`)),
   getArtifact: (id: string) => j<ArtifactSummary>(fetch(`/api/artifacts/${id}`)),
-  artifactContentUrl: (id: string) => `/api/artifacts/${id}/content`
+  artifactContentUrl: (id: string) => `/api/artifacts/${id}/content`,
+
+  // interactions (agent ↔ user Q&A)
+  listInteractions: (runId: string) =>
+    j<AgentInteraction[]>(fetch(`/api/runs/${runId}/interactions`)),
+  listPendingInteractions: () =>
+    j<AgentInteraction[]>(fetch("/api/interactions/pending")),
+  respondToInteraction: (runId: string, interactionId: string, answer: string) =>
+    j<{ interaction: AgentInteraction; delivered: boolean }>(
+      fetch(`/api/runs/${runId}/interactions/${interactionId}/respond`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ answer })
+      })
+    )
 };

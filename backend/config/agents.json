@@ -71,6 +71,33 @@
         "cwd": "{AGENTS_DIR}",
         "protocol": "jsonl"
       }
+    },
+    {
+      "id": "ask-demo",
+      "name": "Ask demo",
+      "description": "Minimal demo of the agent ↔ user Q&A channel: asks for your name and confirms how you'd like to be addressed.",
+      "model": null,
+      "inputs": [
+        {
+          "name": "greeting",
+          "label": "Greeting",
+          "type": "string",
+          "default": "Hi",
+          "description": "Opening word the agent uses (e.g. 'Hi', 'Hello', 'Greetings')."
+        }
+      ],
+      "exec": {
+        "kind": "subprocess",
+        "command": "python",
+        "args": [
+          "-u",
+          "{AGENTS_DIR}/ask-demo/main.py",
+          "--greeting",
+          "{greeting}"
+        ],
+        "cwd": "{AGENTS_DIR}/ask-demo",
+        "protocol": "jsonl"
+      }
     }
   ]
 }

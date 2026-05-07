@@ -21,6 +21,13 @@ function eventLine(ev: ReturnType<typeof useStore.getState>["latestEventByRun"][
       const msg = (ev.payload as { message?: string } | null)?.message ?? "custom";
       return `${node}${msg}`;
     }
+    case "ask_user": {
+      const prompt = (ev.payload as { prompt?: string } | null)?.prompt ?? "";
+      const truncated = prompt.length > 60 ? `${prompt.slice(0, 57)}…` : prompt;
+      return `${node}❓ asking: ${truncated}`;
+    }
+    case "user_response":
+      return `${node}✓ answered`;
     default:
       return `${node}${ev.type}`;
   }
@@ -34,19 +41,40 @@ export default function RightPanel() {
     latestEventByRun,
     firehoseConnected,
     connectFirehose,
-    setCenterView
+    setCenterView,
+    pendingInteractionsByRun,
+    loadPendingInteractions
   } = useStore();
 
   useEffect(() => {
     connectFirehose();
-  }, [connectFirehose]);
+    void loadPendingInteractions();
+  }, [connectFirehose, loadPendingInteractions]);
+
+  const totalPendingRuns = Object.values(pendingInteractionsByRun).filter(
+    list => list.length > 0
+  ).length;
 
   return (
     <aside className={`panel right ${rightCollapsed ? "collapsed" : ""}`}>
       <div className="panel-header">
-        <button className="collapse-btn" onClick={toggleRight} title={rightCollapsed ? "Expand" : "Collapse"}>
-          {rightCollapsed ? "‹" : "›"}
-        </button>
+        <span className="collapse-btn-wrap">
+          <button
+            className="collapse-btn"
+            onClick={toggleRight}
+            title={rightCollapsed ? "Expand" : "Collapse"}
+          >
+            {rightCollapsed ? "‹" : "›"}
+          </button>
+          {rightCollapsed && totalPendingRuns > 0 && (
+            <span
+              className="badge collapsed-badge"
+              title={`${totalPendingRuns} run(s) waiting for your input`}
+            >
+              {totalPendingRuns}
+            </span>
+          )}
+        </span>
         {!rightCollapsed && (
           <div className="panel-title">
             Running tasks{" "}
@@ -66,6 +94,7 @@ export default function RightPanel() {
           <ul className="list">
             {running.map(r => {
               const latest = latestEventByRun[r.id];
+              const pendingCount = pendingInteractionsByRun[r.id]?.length ?? 0;
               return (
                 <li
                   key={r.id}
@@ -74,7 +103,20 @@ export default function RightPanel() {
                   style={{ cursor: "pointer" }}
                 >
                   <div className="list-item-row">
-                    <span className="list-item-title">{r.name}</span>
+                    <span
+                      className="list-item-title"
+                      style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+                    >
+                      {r.name}
+                      {pendingCount > 0 && (
+                        <span
+                          className="badge"
+                          title={`${pendingCount} pending question(s)`}
+                        >
+                          {pendingCount}
+                        </span>
+                      )}
+                    </span>
                     <span className={`status ${r.status}`}>{r.status}</span>
                   </div>
                   <div className="progress">

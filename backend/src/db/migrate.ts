@@ -96,6 +96,19 @@ CREATE TABLE IF NOT EXISTS artifacts (
 );
 CREATE INDEX IF NOT EXISTS artifacts_run_id_idx     ON artifacts (run_id);
 CREATE INDEX IF NOT EXISTS artifacts_run_id_seq_idx ON artifacts (run_id, seq);
+
+CREATE TABLE IF NOT EXISTS agent_interactions (
+  id            text PRIMARY KEY,
+  run_id        text NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+  prompt        text NOT NULL,
+  choices_json  text,
+  status        text NOT NULL,
+  answer        text,
+  created_at    bigint NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint,
+  answered_at   bigint
+);
+CREATE INDEX IF NOT EXISTS agent_interactions_run_id_idx        ON agent_interactions (run_id);
+CREATE INDEX IF NOT EXISTS agent_interactions_run_id_status_idx ON agent_interactions (run_id, status);
 `;
 
 const TABLE_NAMES = [
@@ -106,7 +119,8 @@ const TABLE_NAMES = [
   "runs",
   "run_events",
   "endpoints",
-  "artifacts"
+  "artifacts",
+  "agent_interactions"
 ];
 
 export async function migrate(): Promise<void> {

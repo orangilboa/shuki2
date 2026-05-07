@@ -117,7 +117,9 @@ export type RunEventType =
   | "custom"
   | "error"
   | "done"
-  | "artifact";
+  | "artifact"
+  | "ask_user"
+  | "user_response";
 
 export type RunEventEnvelope<P = unknown> = {
   runId: string;
@@ -151,4 +153,30 @@ export type ArtifactEventPayload = {
   mime: string;
   bytes: number;
   hasInlineContent: boolean;
+};
+
+// ---------- agent ↔ user interactions -----------------------------------
+
+export type AgentInteractionStatus = "pending" | "answered" | "cancelled";
+
+export type AgentInteraction = {
+  id: string;
+  runId: string;
+  prompt: string;
+  choices: string[] | null;
+  status: AgentInteractionStatus;
+  answer: string | null;
+  createdAt: string;
+  answeredAt: string | null;
+};
+
+export type AskUserEventPayload = {
+  interactionId: string;
+  prompt: string;
+  choices?: string[];
+};
+
+export type UserResponseEventPayload = {
+  interactionId: string;
+  answer: string;
 };

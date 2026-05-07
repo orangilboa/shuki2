@@ -12,6 +12,7 @@
 // become `custom` events with the original parsed object as payload.
 
 import { spawn, type ChildProcessByStdio } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { eq } from "drizzle-orm";
 import { db } from "../../db/client.js";
@@ -20,7 +21,13 @@ import type { AgentExec, AgentInput } from "../../types/index.js";
 import { flush, publish } from "../bus.js";
 import { persistArtifact, type RawArtifactPayload } from "../artifacts.js";
 import type { RunEventType } from "../events.js";
-import type { Readable } from "node:stream";
+import {
+  cancelPendingForRun,
+  createInteraction,
+  registerWriter,
+  unregisterWriter
+} from "../interactions/store.js";
+import type { Readable, Writable } from "node:stream";
 
 const KNOWN_EVENT_TYPES: ReadonlySet<RunEventType> = new Set<RunEventType>([
   "run_started",
@@ -32,7 +39,9 @@ const KNOWN_EVENT_TYPES: ReadonlySet<RunEventType> = new Set<RunEventType>([
   "custom",
   "error",
   "done",
-  "artifact"
+  "artifact",
+  "ask_user",
+  "user_response"
 ]);
 
 export type RunSubprocessArgs = {
@@ -150,6 +159,9 @@ export async function runSubprocess(args: RunSubprocessArgs): Promise<void> {
   // and so we can flush all in-flight work before publishing the terminal
   // `done` event below.
   let artifactQueue: Promise<void> = Promise.resolve();
+  // Same idea for interactions: persisting the row before publishing the
+  // event keeps DB and event-log ordering aligned for late subscribers.
+  let interactionQueue: Promise<void> = Promise.resolve();
 
   async function finalize(opts: {
     ok: boolean;
@@ -187,21 +199,49 @@ export async function runSubprocess(args: RunSubprocessArgs): Promise<void> {
     return `"${a.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, "$1$1")}"`;
   };
   const finalArgs = useShell ? expandedArgs.map(quoteForWinShell) : expandedArgs;
-  let child: ChildProcessByStdio<null, Readable, Readable>;
+  let child: ChildProcessByStdio<Writable, Readable, Readable>;
   try {
     child = spawn(exec.command, finalArgs, {
       cwd: expandedCwd,
       env: { ...process.env, ...expandedEnv },
-      stdio: ["ignore", "pipe", "pipe"],
+      // stdin is `pipe` so the backend can deliver answers to ask_user prompts
+      // back into the agent process as JSONL on its stdin.
+      stdio: ["pipe", "pipe", "pipe"],
       shell: useShell,
       windowsHide: true
-    }) as ChildProcessByStdio<null, Readable, Readable>;
+    }) as ChildProcessByStdio<Writable, Readable, Readable>;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     publishEvent("error", null, { message: `spawn failed: ${msg}` });
     publishEvent("done", null, { ok: false, error: msg });
     await finalize({ ok: false, code: null, errorText: msg });
     return;
+  }
+
+  // ---------- interaction writer ----------
+  // Register a writer the routes layer can call to deliver a user_response
+  // back into this process. Returns true if the JSON line was successfully
+  // queued onto stdin; false if the pipe was already closed/destroyed.
+  registerWriter(runId, ({ interactionId, answer }) => {
+    const stdin = child.stdin;
+    if (!stdin || stdin.destroyed || !stdin.writable) return false;
+    try {
+      const line = JSON.stringify({
+        type: "user_response",
+        payload: { interactionId, answer }
+      });
+      return stdin.write(line + "\n");
+    } catch {
+      return false;
+    }
+  });
+
+  // Don't crash the backend if the agent process dies between us asking and
+  // it reading — node fires 'error' on the stdin pipe in that case.
+  if (child.stdin) {
+    child.stdin.on("error", () => {
+      // best-effort delivery; we don't surface this to the run event log
+    });
   }
 
   // ---------- stdout ----------
@@ -228,6 +268,54 @@ export async function runSubprocess(args: RunSubprocessArgs): Promise<void> {
         const payload = obj.payload ?? {};
         if (KNOWN_EVENT_TYPES.has(obj.type as RunEventType)) {
           const evType = obj.type as RunEventType;
+          if (evType === "ask_user") {
+            // Persist the question to agent_interactions, then publish.
+            // Use the agent-supplied interactionId if present so the agent's
+            // internal stdin reader can match the response by id.
+            const rawPayload =
+              payload && typeof payload === "object"
+                ? (payload as {
+                    interactionId?: unknown;
+                    prompt?: unknown;
+                    choices?: unknown;
+                  })
+                : {};
+            const interactionId =
+              typeof rawPayload.interactionId === "string" &&
+              rawPayload.interactionId.length > 0
+                ? rawPayload.interactionId
+                : randomUUID();
+            const prompt =
+              typeof rawPayload.prompt === "string" ? rawPayload.prompt : "";
+            const choices =
+              Array.isArray(rawPayload.choices) &&
+              rawPayload.choices.every((c) => typeof c === "string")
+                ? (rawPayload.choices as string[])
+                : null;
+            const normalisedPayload = {
+              interactionId,
+              prompt,
+              ...(choices ? { choices } : {})
+            };
+            interactionQueue = interactionQueue.then(async () => {
+              try {
+                await createInteraction({
+                  id: interactionId,
+                  runId,
+                  prompt,
+                  choices
+                });
+              } catch (err) {
+                const reason =
+                  err instanceof Error ? err.message : String(err);
+                publishEvent("token", null, {
+                  text: `[interaction persist failed: ${reason}]`
+                });
+              }
+            });
+            publishEvent(evType, node, normalisedPayload);
+            return;
+          }
           if (evType === "artifact") {
             // Artifact events take a separate path: persist to disk/DB and
             // republish via the bus (which assigns the seq used in the row).
@@ -339,6 +427,25 @@ export async function runSubprocess(args: RunSubprocessArgs): Promise<void> {
         await artifactQueue;
       } catch {
         // persistArtifact swallows its own errors via the queue's catch path.
+      }
+      // Same for interaction persistence — we want the rows committed before
+      // we cancel the still-pending ones below.
+      try {
+        await interactionQueue;
+      } catch {
+        // best-effort
+      }
+
+      // Stop accepting answer-deliveries for this run, then mark any
+      // unanswered questions as cancelled so the UI can clear its badges.
+      unregisterWriter(runId);
+      try {
+        await cancelPendingForRun(runId);
+      } catch (err) {
+        console.error(
+          `[subprocess] cancelPendingForRun run=${runId}:`,
+          err instanceof Error ? err.message : err
+        );
       }
 
       const aborted = signal.aborted;
