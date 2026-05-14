@@ -34,6 +34,7 @@ Other markdown files are *not* auto-loaded. The doc set under `docs/` is referen
 - [docs/postgres.md](docs/postgres.md) — Postgres deployment quickstart (DB + role provisioning).
 - [docs/agent-python.md](docs/agent-python.md) — author a new Python agent (LangGraph + JSONL protocol).
 - [docs/agent-typescript.md](docs/agent-typescript.md) — author a new TypeScript agent (`@langchain/langgraph` + JSONL protocol).
+- [docs/langgraph-platform.md](docs/langgraph-platform.md) — LangGraph Platform OSS migration (Phase A infra landed; see doc for what's pending).
 
 > **If you want a future Claude session to find a doc**: either rename it to `CLAUDE.md` in the relevant directory (auto-loaded) or link to it from one of the existing CLAUDE.md files. There is no other naming convention that triggers auto-discovery.
 

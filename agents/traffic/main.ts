@@ -10,6 +10,7 @@
  *   tsx main.ts --origin "Shibuya" --destination "Shinjuku"
  */
 import { parseArgs } from "node:util";
+import { pathToFileURL } from "node:url";
 import { Annotation, END, START, StateGraph } from "@langchain/langgraph";
 
 import {
@@ -145,4 +146,7 @@ async function main(): Promise<void> {
   }
 }
 
-void main();
+const isCliEntry =
+  typeof process.argv[1] === "string" &&
+  import.meta.url === pathToFileURL(process.argv[1]).href;
+if (isCliEntry) void main();
