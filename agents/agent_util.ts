@@ -12,6 +12,7 @@
  * Event types match the backend's RunEventType vocabulary:
  *   node_start | node_end | token | tool_call | tool_result
  *   custom     | error    | done
+ *   waiting_for_llm | done_waiting
  *
  * Anything you write to stdout outside these helpers becomes a `token` event.
  */
@@ -27,7 +28,9 @@ export type EventType =
   | "done"
   | "artifact"
   | "ask_user"
-  | "user_response";
+  | "user_response"
+  | "waiting_for_llm"
+  | "done_waiting";
 
 export type EventLine = {
   type: EventType;
@@ -128,6 +131,72 @@ export function artifactFile(
   emit({ type: "artifact", node: opts.node ?? null, payload });
 }
 
+// ---------- llm wait (UI live-counter signal) ---------------------------
+//
+// Surfaces a live elapsed-seconds counter in the run-view log between
+// `waiting_for_llm` and `done_waiting`. Pure UI signal, no DB side effect.
+//
+// Prefer `withLlmWait()` — it generates a waitId, times the awaited
+// promise, emits the paired events, and reports `ok=false` if the wrapped
+// code throws. Use the standalone emitters when the wait spans an awkward
+// control-flow boundary.
+
+import { randomUUID } from "node:crypto";
+
+export function waitingForLlm(
+  opts: { label?: string; model?: string; node?: string } = {}
+): string {
+  const waitId = randomUUID();
+  const payload: Record<string, unknown> = { waitId };
+  if (opts.label !== undefined) payload.label = opts.label;
+  if (opts.model !== undefined) payload.model = opts.model;
+  emit({ type: "waiting_for_llm", node: opts.node ?? null, payload });
+  return waitId;
+}
+
+export function doneWaiting(
+  waitId: string,
+  opts: { durationMs?: number; ok?: boolean; node?: string } = {}
+): void {
+  const payload: Record<string, unknown> = {
+    waitId,
+    ok: opts.ok ?? true
+  };
+  if (opts.durationMs !== undefined) payload.durationMs = opts.durationMs;
+  emit({ type: "done_waiting", node: opts.node ?? null, payload });
+}
+
+/**
+ * Wrap an awaited block in a paired `waiting_for_llm` / `done_waiting`.
+ * The matching events carry the same `waitId` and the duration is timed
+ * via `Date.now()`. If `fn` throws, `done_waiting` is emitted with
+ * `ok: false` and the original error is re-thrown.
+ */
+export async function withLlmWait<T>(
+  label: string | undefined,
+  fn: () => Promise<T>,
+  opts: { model?: string; node?: string } = {}
+): Promise<T> {
+  const waitId = waitingForLlm({ label, model: opts.model, node: opts.node });
+  const t0 = Date.now();
+  try {
+    const result = await fn();
+    doneWaiting(waitId, {
+      durationMs: Date.now() - t0,
+      ok: true,
+      node: opts.node
+    });
+    return result;
+  } catch (err) {
+    doneWaiting(waitId, {
+      durationMs: Date.now() - t0,
+      ok: false,
+      node: opts.node
+    });
+    throw err;
+  }
+}
+
 // ---------- ask_user (agent ↔ user Q&A) ---------------------------------
 //
 // Emits an `ask_user` event and returns a promise that resolves with the
@@ -137,8 +206,6 @@ export function artifactFile(
 // A single shared stdin reader is initialised lazily on the first call and
 // dispatches each response to the matching pending promise by interactionId,
 // so multiple concurrent questions are fine.
-
-import { randomUUID } from "node:crypto";
 
 type Resolver = (answer: string) => void;
 const pendingResolvers = new Map<string, Resolver>();

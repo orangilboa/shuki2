@@ -47,6 +47,8 @@ The persisted form in `run_events` stores `payload_json` (text) plus the rest as
 | `artifact`    | agent → runner → bus | `{ artifactId, name, kind, mime, bytes, hasInlineContent }` | Agent emits with `{ name, kind, content?|path?, mime? }`; the runner persists, then publishes the metadata-only payload above. See "Artifacts". |
 | `error`       | agent/engine/runner → bus | `{ message: string, ... }` | Sets the run to failed at finalisation. May be followed by a `done`. |
 | `done`        | agent/engine/runner → bus | `{ ok: boolean, ... }` | Optional from agents; the runner synthesises one if a process exits without it. After `done` the UI considers the run terminal. |
+| `waiting_for_llm` | agent → bus | `{ waitId?: string, label?: string, model?: string }` | Signals a blocking LLM call. The FE renders a live elapsed-seconds counter until the matching `done_waiting` arrives. Pure UI signal — **no DB side effect**. Pair by `waitId` when present; otherwise the FE pairs by `node` (most-recent unpaired wait wins, LIFO). |
+| `done_waiting`    | agent → bus | `{ waitId?: string, durationMs?: number, ok?: boolean }` | Closes the pair opened by `waiting_for_llm`. `durationMs` is the agent's ground-truth timing; the FE prefers it over wall-clock deltas once available. The bare event is dropped from the central log (the paired waiting row carries its information). |
 
 ## Subprocess agents — the JSONL surface
 

@@ -12,17 +12,20 @@ write so the backend gets events live, not at process exit.
 Event types match the backend's `RunEventType` vocabulary:
     node_start | node_end | token | tool_call | tool_result
     custom     | error    | done
+    waiting_for_llm | done_waiting
 
 Anything you `print()` outside these helpers becomes a `token` event.
 """
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import sys
 import threading
+import time
 import uuid
-from typing import Any
+from typing import Any, Iterator
 
 # Force UTF-8 stdout so non-ASCII payloads (e.g. ° µ) round-trip safely on
 # Windows where the default console encoding is cp1252.
@@ -80,6 +83,85 @@ def done(*, ok: bool = True, **extra: Any) -> None:
     without emitting it, but emitting it explicitly lets you attach a
     summary payload."""
     emit("done", payload={"ok": ok, **extra})
+
+
+# ---------- llm wait (UI live-counter signal) -----------------------------
+#
+# Surfaces a live elapsed-seconds counter in the run-view log between
+# `waiting_for_llm` and `done_waiting`. Pure UI signal, no DB side effect.
+#
+# Prefer the `llm_wait()` context manager — it generates a waitId, times the
+# block, emits the paired events, and reports ok=False if the wrapped code
+# raises. Use the standalone emitters when the wait spans an awkward
+# control-flow boundary.
+
+
+def waiting_for_llm(
+    label: str | None = None,
+    *,
+    model: str | None = None,
+    node: str | None = None,
+) -> str:
+    """Signal that the agent is blocked on an LLM call. Returns the generated
+    `waitId` — pass it to `done_waiting()` to close the pair.
+    """
+    wait_id = str(uuid.uuid4())
+    payload: dict[str, Any] = {"waitId": wait_id}
+    if label is not None:
+        payload["label"] = label
+    if model is not None:
+        payload["model"] = model
+    emit("waiting_for_llm", node=node, payload=payload)
+    return wait_id
+
+
+def done_waiting(
+    wait_id: str,
+    *,
+    duration_ms: int | None = None,
+    ok: bool = True,
+    node: str | None = None,
+) -> None:
+    """Close the pair opened by `waiting_for_llm()`."""
+    payload: dict[str, Any] = {"waitId": wait_id, "ok": ok}
+    if duration_ms is not None:
+        payload["durationMs"] = duration_ms
+    emit("done_waiting", node=node, payload=payload)
+
+
+@contextlib.contextmanager
+def llm_wait(
+    label: str | None = None,
+    *,
+    model: str | None = None,
+    node: str | None = None,
+) -> Iterator[str]:
+    """Context manager that emits a paired `waiting_for_llm`/`done_waiting`
+    around a blocking LLM call. Reports `ok=False` if the block raises.
+
+    Usage:
+        with llm_wait("calling claude-opus-4-7", model=model, node="plan"):
+            response = client.messages.create(...)
+    """
+    wait_id = waiting_for_llm(label, model=model, node=node)
+    t0 = time.monotonic()
+    try:
+        yield wait_id
+    except BaseException:
+        done_waiting(
+            wait_id,
+            duration_ms=int((time.monotonic() - t0) * 1000),
+            ok=False,
+            node=node,
+        )
+        raise
+    else:
+        done_waiting(
+            wait_id,
+            duration_ms=int((time.monotonic() - t0) * 1000),
+            ok=True,
+            node=node,
+        )
 
 
 # ---------- artifacts ------------------------------------------------------

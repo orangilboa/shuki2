@@ -41,7 +41,9 @@ const KNOWN_EVENT_TYPES: ReadonlySet<RunEventType> = new Set<RunEventType>([
   "done",
   "artifact",
   "ask_user",
-  "user_response"
+  "user_response",
+  "waiting_for_llm",
+  "done_waiting"
 ]);
 
 export type RunSubprocessArgs = {

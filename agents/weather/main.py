@@ -25,6 +25,7 @@ from agent_util import (  # noqa: E402
     custom,
     done,
     emit_error,
+    llm_wait,
     node_end,
     node_start,
     token,
@@ -52,7 +53,10 @@ def fetch_node(state: WeatherState) -> WeatherState:
     node_start("fetch", {"location": location, "days": days})
     token(f"looking up {location}…", node="fetch")
     tool_call("weather_api.lookup", args={"location": location, "days": days}, node="fetch")
-    time.sleep(0.4)  # pretend network latency
+    # Simulate a blocking LLM call so the UI shows the live elapsed-seconds
+    # counter between `waiting_for_llm` and `done_waiting`.
+    with llm_wait("calling forecast model", model="mock-forecast-v1", node="fetch"):
+        time.sleep(2.5)  # pretend LLM latency
 
     rng = random.Random(hash(location) & 0xFFFFFFFF)
     raw = []

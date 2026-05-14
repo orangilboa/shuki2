@@ -28,6 +28,13 @@ function eventLine(ev: ReturnType<typeof useStore.getState>["latestEventByRun"][
     }
     case "user_response":
       return `${node}✓ answered`;
+    case "waiting_for_llm": {
+      const label =
+        (ev.payload as { label?: string } | null)?.label ?? "waiting for LLM";
+      return `${node}⏳ ${label}`;
+    }
+    case "done_waiting":
+      return `${node}✓ LLM done`;
     default:
       return `${node}${ev.type}`;
   }

@@ -119,7 +119,9 @@ export type RunEventType =
   | "done"
   | "artifact"
   | "ask_user"
-  | "user_response";
+  | "user_response"
+  | "waiting_for_llm"
+  | "done_waiting";
 
 export type RunEventEnvelope<P = unknown> = {
   runId: string;
@@ -179,4 +181,24 @@ export type AskUserEventPayload = {
 export type UserResponseEventPayload = {
   interactionId: string;
   answer: string;
+};
+
+// ---------- LLM wait events ----------------------------------------------
+
+/**
+ * Emitted by an agent when it begins a blocking LLM call. The frontend
+ * renders a live elapsed-seconds counter between this event and the matching
+ * `done_waiting`. Pair by `waitId` if present; otherwise the FE pairs by
+ * `node` (most-recent unpaired wait on the same node wins).
+ */
+export type WaitingForLLMEventPayload = {
+  waitId?: string;
+  label?: string;
+  model?: string;
+};
+
+export type DoneWaitingEventPayload = {
+  waitId?: string;
+  durationMs?: number;
+  ok?: boolean;
 };
