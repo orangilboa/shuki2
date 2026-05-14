@@ -21,7 +21,8 @@ import {
   nodeStart,
   token,
   toolCall,
-  toolResult
+  toolResult,
+  withLlmWait
 } from "../agent_util.js";
 
 type Segment = { name: string; minutes: number; level: "light" | "moderate" | "heavy" };
@@ -43,7 +44,13 @@ async function lookupNode(state: typeof TrafficState.State) {
   nodeStart("lookup", { origin: state.origin, destination: state.destination });
   token(`looking up traffic ${state.origin} → ${state.destination}…`, "lookup");
   toolCall("maps.route", { origin: state.origin, destination: state.destination }, "lookup");
-  await sleep(400);
+  // Simulate a blocking LLM call so the UI renders the live elapsed-seconds
+  // counter between `waiting_for_llm` and `done_waiting`.
+  await withLlmWait(
+    "calling traffic model",
+    () => sleep(2500),
+    { model: "mock-traffic-v1", node: "lookup" }
+  );
 
   const seedStr = `${state.origin}|${state.destination}`;
   let seed = 0;

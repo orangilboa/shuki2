@@ -1,8 +1,14 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "../../store/useStore";
-import type { AskUserEventPayload, RunEventEnvelope } from "../../types";
+import type {
+  AskUserEventPayload,
+  DoneWaitingEventPayload,
+  RunEventEnvelope,
+  WaitingForLLMEventPayload
+} from "../../types";
 import Tabs from "../Tabs";
 import ArtifactsTab from "../ArtifactsTab";
+import WaitingForLLMRow from "../WaitingForLLMRow";
 
 type TabId = "logs" | "artifacts";
 
@@ -58,6 +64,56 @@ export default function RunView({ runId }: { runId: string }) {
   // Prefer the dedicated stream; fall back to whatever the firehose left in store.
   const events = localEvents.length > 0 ? localEvents : eventsFromStore ?? [];
   const artifactCount = artifacts?.length ?? 0;
+
+  // Pair `waiting_for_llm` events with their matching `done_waiting`. Built
+  // once per event-list update so each row render is O(1). Pairing rule:
+  //   • explicit waitId match wins;
+  //   • otherwise nearest-unpaired-by-node (LIFO) on the same `node`.
+  const waitPairings = useMemo(() => {
+    const map = new Map<number, RunEventEnvelope<DoneWaitingEventPayload>>();
+    const consumed = new Set<number>();
+    // Stack of unpaired waiting events, keyed by node (null treated as "").
+    const stackByNode = new Map<string, RunEventEnvelope<WaitingForLLMEventPayload>[]>();
+    for (const ev of events) {
+      if (ev.type === "waiting_for_llm") {
+        const key = ev.node ?? "";
+        const stack = stackByNode.get(key) ?? [];
+        stack.push(ev as RunEventEnvelope<WaitingForLLMEventPayload>);
+        stackByNode.set(key, stack);
+        continue;
+      }
+      if (ev.type !== "done_waiting") continue;
+      const doneEv = ev as RunEventEnvelope<DoneWaitingEventPayload>;
+      const doneId = doneEv.payload?.waitId;
+      // Explicit waitId — walk all stacks to find the match.
+      if (typeof doneId === "string" && doneId.length > 0) {
+        let matched: RunEventEnvelope<WaitingForLLMEventPayload> | undefined;
+        for (const [, stack] of stackByNode) {
+          const idx = stack.findIndex(
+            w => w.payload?.waitId === doneId && !consumed.has(w.seq)
+          );
+          if (idx !== -1) {
+            matched = stack.splice(idx, 1)[0];
+            break;
+          }
+        }
+        if (matched) {
+          consumed.add(matched.seq);
+          map.set(matched.seq, doneEv);
+        }
+        continue;
+      }
+      // Implicit: pop nearest unpaired on the same node.
+      const key = doneEv.node ?? "";
+      const stack = stackByNode.get(key);
+      if (stack && stack.length > 0) {
+        const matched = stack.pop()!;
+        consumed.add(matched.seq);
+        map.set(matched.seq, doneEv);
+      }
+    }
+    return map;
+  }, [events]);
 
   return (
     <div className="view">
@@ -120,6 +176,22 @@ export default function RunView({ runId }: { runId: string }) {
               // The matching ask_user event renders the resolved Q&A above
               // (assuming both events are in `events`). Drop the bare
               // user_response from the log to avoid duplicate display.
+              return null;
+            }
+            if (ev.type === "waiting_for_llm") {
+              const done = waitPairings.get(ev.seq);
+              return (
+                <WaitingForLLMRow
+                  key={ev.seq}
+                  startTs={ev.ts}
+                  waiting={ev.payload as WaitingForLLMEventPayload}
+                  done={done && { payload: done.payload, ts: done.ts }}
+                />
+              );
+            }
+            if (ev.type === "done_waiting") {
+              // Rendered inline by the matching `waiting_for_llm` row above
+              // (or, for an orphaned done, simply hidden). Drop from the log.
               return null;
             }
             return (

@@ -76,6 +76,7 @@ Vocabulary (use the `agent_util` helpers — don't hand-format):
 | `user_response` | Emitted by the **backend** (not by your agent) when the user answers. Payload `{ interactionId, answer }`. The matching JSONL line is also written to your stdin so the helper can resolve. |
 | `error` | A fatal error message. The backend will set the run to failed. |
 | `done` | Final event with `{ ok, ...summary }`. Optional — if you exit cleanly, the runner synthesises one. |
+| `waiting_for_llm` / `done_waiting` | Wrap a blocking LLM call so the UI shows a live elapsed-seconds counter. Use the `llm_wait` / `withLlmWait` helper rather than emitting by hand — it pairs the events with a `waitId` and records the duration. |
 
 Full payload shapes are in [../docs/protocol.md](../docs/protocol.md).
 
@@ -87,10 +88,13 @@ Full payload shapes are in [../docs/protocol.md](../docs/protocol.md).
 from agent_util import (
     node_start, node_end, token, tool_call, tool_result,
     custom, artifact, artifact_file, emit_error, done,
+    llm_wait,
 )
 
 node_start("fetch", {"location": "Tokyo"})
 token("looking up Tokyo…", node="fetch")
+with llm_wait("calling forecast model", node="fetch"):
+    response = call_llm(...)  # UI shows a live elapsed-seconds counter
 artifact("forecast.md", "md", "# Tokyo\n…")
 node_end("fetch", progress=0.5)
 done(ok=True, summary="Forecast ready")
@@ -104,10 +108,12 @@ The module forces `sys.stdout` to UTF-8 on import (Windows safety — the defaul
 import {
   nodeStart, nodeEnd, token, toolCall, toolResult,
   custom, artifact, artifactFile, emitError, done,
+  withLlmWait,
 } from "../agent_util.js";
 
 nodeStart("lookup", { origin, destination });
 token(`hitting maps API…`, "lookup");
+const result = await withLlmWait("calling traffic model", () => callLlm(...), { node: "lookup" });
 artifact("traffic.md", "md", `# Traffic\n…`);
 nodeEnd("lookup", { progress: 0.5 });
 done(true, { summary: "ETA ~46 min" });

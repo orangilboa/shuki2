@@ -16,7 +16,14 @@ export type RunEventType =
   // backend emits `user_response` once the user has answered. The matching
   // identifier on both is `payload.interactionId`.
   | "ask_user"
-  | "user_response";
+  | "user_response"
+  // LLM wait signal. The agent emits `waiting_for_llm` before a blocking LLM
+  // call and `done_waiting` once the response arrives. The UI renders a live
+  // elapsed-seconds counter between the two. Pure UI signals — no DB side
+  // effect. Pair by `payload.waitId` when present; otherwise the FE pairs by
+  // `node` (most-recent unpaired wait wins).
+  | "waiting_for_llm"
+  | "done_waiting";
 
 export type RunEventEnvelope<P = unknown> = {
   runId: string;
