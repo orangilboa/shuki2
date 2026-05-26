@@ -2,5 +2,6 @@ packages:
   - 'backend'
   - 'frontend'
   - 'agents'
+  - 'desktop'
 allowBuilds:
   esbuild: true
