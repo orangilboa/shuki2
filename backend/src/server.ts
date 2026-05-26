@@ -6,6 +6,8 @@ import { runningRouter, scheduledRouter, agentsRouter } from "./routes/agents.js
 import { runsRouter, eventsFirehose, interactionsRouter } from "./routes/runs.js";
 import { artifactsRouter } from "./routes/artifacts.js";
 import { endpointsRouter, modelsRouter } from "./routes/endpoints.js";
+import { commandsRouter } from "./routes/commands.js";
+import { registerBuiltinCommands } from "./commands/builtin.js";
 import { migrate } from "./db/migrate.js";
 
 const app = express();
@@ -27,7 +29,10 @@ app.use("/api/interactions", interactionsRouter);
 app.use("/api/artifacts", artifactsRouter);
 app.use("/api/endpoints", endpointsRouter);
 app.use("/api/models", modelsRouter);
+app.use("/api/commands", commandsRouter);
 app.get("/api/events", eventsFirehose);
+
+registerBuiltinCommands();
 
 // Run schema sync BEFORE we start accepting requests.
 async function start(): Promise<void> {

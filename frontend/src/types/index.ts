@@ -202,3 +202,12 @@ export type DoneWaitingEventPayload = {
   durationMs?: number;
   ok?: boolean;
 };
+
+// ---------- commands ----------------------------------------------------
+
+export type CommandSummary = {
+  id: string;
+  title: string;
+  description: string;
+  inputs: AgentInput[];
+};
