@@ -109,6 +109,31 @@ CREATE TABLE IF NOT EXISTS agent_interactions (
 );
 CREATE INDEX IF NOT EXISTS agent_interactions_run_id_idx        ON agent_interactions (run_id);
 CREATE INDEX IF NOT EXISTS agent_interactions_run_id_status_idx ON agent_interactions (run_id, status);
+
+CREATE TABLE IF NOT EXISTS channels (
+  id                  text PRIMARY KEY,
+  name                text NOT NULL,
+  kind                text NOT NULL,
+  direction           text NOT NULL,
+  enabled             text NOT NULL DEFAULT 'false',
+  filter_json         text NOT NULL DEFAULT '{}',
+  inbound_json        text NOT NULL DEFAULT '{}',
+  adapter_config_json text NOT NULL DEFAULT '{}',
+  created_at          bigint NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint,
+  updated_at          bigint NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint
+);
+
+CREATE TABLE IF NOT EXISTS channel_messages (
+  id              text PRIMARY KEY,
+  channel_id      text NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+  direction       text NOT NULL,
+  kind            text NOT NULL,
+  payload_json    text NOT NULL DEFAULT '{}',
+  correlation_id  text,
+  created_at      bigint NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint
+);
+CREATE INDEX IF NOT EXISTS channel_messages_channel_id_idx            ON channel_messages (channel_id);
+CREATE INDEX IF NOT EXISTS channel_messages_channel_id_created_at_idx ON channel_messages (channel_id, created_at);
 `;
 
 const TABLE_NAMES = [
@@ -120,7 +145,9 @@ const TABLE_NAMES = [
   "run_events",
   "endpoints",
   "artifacts",
-  "agent_interactions"
+  "agent_interactions",
+  "channels",
+  "channel_messages"
 ];
 
 export async function migrate(): Promise<void> {

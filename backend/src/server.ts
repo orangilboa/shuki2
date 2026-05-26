@@ -6,6 +6,8 @@ import { runningRouter, scheduledRouter, agentsRouter } from "./routes/agents.js
 import { runsRouter, eventsFirehose, interactionsRouter } from "./routes/runs.js";
 import { artifactsRouter } from "./routes/artifacts.js";
 import { endpointsRouter, modelsRouter } from "./routes/endpoints.js";
+import { channelsRouter } from "./routes/channels.js";
+import { startEnabled as startEnabledChannels, stopAll as stopAllChannels } from "./channels/runtime.js";
 import { migrate } from "./db/migrate.js";
 
 const app = express();
@@ -27,13 +29,21 @@ app.use("/api/interactions", interactionsRouter);
 app.use("/api/artifacts", artifactsRouter);
 app.use("/api/endpoints", endpointsRouter);
 app.use("/api/models", modelsRouter);
+app.use("/api/channels", channelsRouter);
 app.get("/api/events", eventsFirehose);
 
 // Run schema sync BEFORE we start accepting requests.
 async function start(): Promise<void> {
   await migrate();
+  await startEnabledChannels();
   app.listen(PORT, () => {
     console.log(`[openshuki-backend] listening on http://localhost:${PORT}`);
+  });
+}
+
+for (const sig of ["SIGINT", "SIGTERM"] as const) {
+  process.once(sig, () => {
+    void stopAllChannels().finally(() => process.exit(0));
   });
 }
 

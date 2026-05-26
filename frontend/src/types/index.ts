@@ -202,3 +202,74 @@ export type DoneWaitingEventPayload = {
   durationMs?: number;
   ok?: boolean;
 };
+
+// ---------- channels -----------------------------------------------------
+
+export type ChannelDirection = "in_out" | "out_only" | "in_only";
+
+export type ChannelSource = "config" | "user";
+
+export type ChannelEventCategory =
+  | "run.lifecycle"
+  | "run.progress"
+  | "run.logs"
+  | "run.tools"
+  | "run.artifacts"
+  | "run.interactions"
+  | "run.errors"
+  | "run.llm_wait";
+
+export const CHANNEL_EVENT_CATEGORIES: ChannelEventCategory[] = [
+  "run.lifecycle",
+  "run.progress",
+  "run.logs",
+  "run.tools",
+  "run.artifacts",
+  "run.interactions",
+  "run.errors",
+  "run.llm_wait"
+];
+
+export type ChannelFilter = {
+  eventCategories: ChannelEventCategory[];
+  includeTypes?: string[];
+  excludeTypes?: string[];
+  agentIds?: string[];
+};
+
+export type ChannelInboundPolicy = {
+  allowCommands: boolean;
+  allowedCommandIds: string[];
+};
+
+export type ChannelSummary = {
+  id: string;
+  name: string;
+  kind: string;
+  direction: ChannelDirection;
+  enabled: boolean;
+  filter: ChannelFilter;
+  inbound: ChannelInboundPolicy;
+  adapterConfig: Record<string, unknown>;
+  source: ChannelSource;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ChannelKindDescriptor = {
+  kind: string;
+  defaultDirection: ChannelDirection;
+};
+
+export type ChannelMessageDirection = "in" | "out";
+export type ChannelMessageKind = "command" | "event" | "chat" | "notification";
+
+export type ChannelMessageSummary = {
+  id: string;
+  channelId: string;
+  direction: ChannelMessageDirection;
+  kind: ChannelMessageKind;
+  payload: unknown;
+  correlationId: string | null;
+  createdAt: string;
+};
