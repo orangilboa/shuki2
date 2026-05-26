@@ -4,6 +4,13 @@ import type {
   AgentInput,
   AgentInteraction,
   ArtifactSummary,
+  ChannelDirection,
+  ChannelFilter,
+  ChannelInboundPolicy,
+  ChannelKindDescriptor,
+  ChannelMessageSummary,
+  ChannelSummary,
+  CommandSummary,
   Conversation,
   ConversationSummary,
   EndpointSummary,
@@ -168,5 +175,63 @@ export const api = {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ answer })
       })
+    ),
+
+  // channels
+  listChannels: () => j<ChannelSummary[]>(fetch("/api/channels")),
+  listChannelKinds: () => j<ChannelKindDescriptor[]>(fetch("/api/channels/kinds")),
+  listChannelMessages: (id: string, limit?: number) =>
+    j<ChannelMessageSummary[]>(
+      fetch(`/api/channels/${id}/messages${limit ? `?limit=${limit}` : ""}`)
+    ),
+  createChannel: (input: ChannelCreateInput) =>
+    j<ChannelSummary>(
+      fetch("/api/channels", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input)
+      })
+    ),
+  updateChannel: (id: string, patch: ChannelPatchInput) =>
+    j<ChannelSummary>(
+      fetch(`/api/channels/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch)
+      })
+    ),
+  enableChannel: (id: string) =>
+    j<ChannelSummary>(
+      fetch(`/api/channels/${id}/enable`, { method: "POST" })
+    ),
+  disableChannel: (id: string) =>
+    j<ChannelSummary>(
+      fetch(`/api/channels/${id}/disable`, { method: "POST" })
+    ),
+  deleteChannel: (id: string) =>
+    jVoid(fetch(`/api/channels/${id}`, { method: "DELETE" })),
+
+  // commands (the unified verb surface — REST + chat dispatch share this)
+  listCommands: () => j<CommandSummary[]>(fetch("/api/commands")),
+  getCommand: (id: string) => j<CommandSummary>(fetch(`/api/commands/${id}`)),
+  dispatchCommand: <T = unknown>(id: string, input: Record<string, unknown>) =>
+    j<T>(
+      fetch(`/api/commands/${id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input)
+      })
     )
 };
+
+export type ChannelCreateInput = {
+  name: string;
+  kind: string;
+  direction: ChannelDirection;
+  enabled?: boolean;
+  filter: ChannelFilter;
+  inbound: ChannelInboundPolicy;
+  adapterConfig?: Record<string, unknown>;
+};
+
+export type ChannelPatchInput = Partial<ChannelCreateInput>;

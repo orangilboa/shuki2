@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useStore } from "../../store/useStore";
 import type { Agent, AgentExec, AgentInput, EndpointSummary } from "../../types";
 import ModelPicker from "../ModelPicker";
+import ChannelsSection from "./ChannelsSection";
 
 // ---------- helpers for JSON validation ----------------------------------
 
@@ -681,6 +682,8 @@ export default function SettingsView() {
           </ul>
         )}
       </section>
+
+      <ChannelsSection />
 
       <section className="section">
         <div className="section-header">
