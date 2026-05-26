@@ -1,1 +1,21 @@
-[]
+[
+  {
+    "id": "notifications-default",
+    "name": "Windows notifications",
+    "kind": "notifications.windows",
+    "direction": "out_only",
+    "enabled": false,
+    "filter": {
+      "eventCategories": ["run.lifecycle", "run.interactions", "run.errors"]
+    },
+    "inbound": {
+      "allowCommands": false,
+      "allowedCommandIds": []
+    },
+    "adapterConfig": {
+      "summaryStyle": "compact",
+      "soundEnabled": true,
+      "maxPerMinute": 10
+    }
+  }
+]

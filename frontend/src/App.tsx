@@ -15,7 +15,8 @@ export default function App() {
     loadEndpoints,
     loadModels,
     leftCollapsed,
-    rightCollapsed
+    rightCollapsed,
+    setCenterView
   } = useStore();
 
   useEffect(() => {
@@ -33,6 +34,20 @@ export default function App() {
     loadEndpoints,
     loadModels
   ]);
+
+  // Desktop tray-mode notifications dispatch this event when a toast is
+  // clicked; navigate the center panel to the relevant run.
+  useEffect(() => {
+    const handler = (e: Event): void => {
+      const ce = e as CustomEvent<{ runId?: string }>;
+      const runId = ce.detail?.runId;
+      if (typeof runId === "string" && runId.length > 0) {
+        setCenterView({ kind: "run", runId });
+      }
+    };
+    window.addEventListener("openshuki:open-run", handler);
+    return () => window.removeEventListener("openshuki:open-run", handler);
+  }, [setCenterView]);
 
   return (
     <div className="app">

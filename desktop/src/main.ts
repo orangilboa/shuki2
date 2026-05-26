@@ -8,10 +8,12 @@
 import { BrowserWindow, app, dialog, shell } from "electron";
 import path from "node:path";
 import { startBackend, type BackendHandle } from "./backend";
+import { startNotifyServer, type NotifyServer } from "./notifications";
 import { createTray } from "./tray";
 
 let mainWindow: BrowserWindow | null = null;
 let backend: BackendHandle | null = null;
+let notifyServer: NotifyServer | null = null;
 let trayHandle: ReturnType<typeof createTray> | null = null;
 let quitting = false;
 
@@ -41,6 +43,11 @@ async function main(): Promise<void> {
   // current backend (no port re-read after listen()); we fix the port so
   // the frontend's existing /api proxy/relative URLs keep working.
   const port = Number(process.env.OPENSHUKI_BACKEND_PORT ?? 4000);
+
+  // Start the notifications HTTP listener BEFORE the backend so the
+  // backend can pick up OPENSHUKI_NOTIFY_PORT from env at boot.
+  notifyServer = await startNotifyServer(() => mainWindow);
+  process.env.OPENSHUKI_NOTIFY_PORT = String(notifyServer.port);
 
   try {
     backend = await startBackend(port);
@@ -106,6 +113,7 @@ app.on("before-quit", () => {
   quitting = true;
   trayHandle?.destroy();
   backend?.stop();
+  void notifyServer?.stop();
 });
 
 // Don't auto-quit when the window is hidden — that's the tray behaviour.

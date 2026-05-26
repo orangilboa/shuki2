@@ -3,3 +3,4 @@
 // here.
 
 import "./chatHttpPoll.js";
+import "./notificationsWindows.js";
