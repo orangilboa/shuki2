@@ -2,11 +2,10 @@ import { Router, type Request, type Response } from "express";
 import { eq, inArray } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { runs, scheduledTasks, agents } from "../db/schema.js";
-import { startRun } from "../runs/engine.js";
+import { dispatchAgentRun } from "../runs/dispatch.js";
 import {
   createUserAgent,
   deleteUserAgent,
-  ensureConfigAgentShadow,
   findById as findAgentById,
   isConfigAgent,
   listAll as listAllAgents,
@@ -163,12 +162,6 @@ agentsRouter.delete("/:id", async (req: Request, res: Response) => {
 });
 
 agentsRouter.post("/:id/run", async (req: Request, res: Response) => {
-  const agent = await findAgentById((req.params.id as string));
-  if (!agent) {
-    res.status(404).json({ error: "not_found" });
-    return;
-  }
-
   const body = (req.body ?? {}) as { model?: unknown; inputs?: unknown };
   // Accept either a flat body of inputs, or an explicit { inputs, model }.
   const rawInputs =
@@ -179,46 +172,19 @@ agentsRouter.post("/:id/run", async (req: Request, res: Response) => {
           return rest;
         })();
 
-  // Per-invocation model overrides the agent default.
-  const requestedModel = typeof body.model === "string" && body.model.length > 0 ? body.model : null;
-  const model = requestedModel ?? agent.model ?? null;
+  const requestedModel =
+    typeof body.model === "string" && body.model.length > 0 ? body.model : null;
 
-  // Config-file agents aren't in the DB; ensure a shadow row so the
-  // `runs.agent_id` FK can be satisfied. Idempotent.
-  if (agent.source === "config") await ensureConfigAgentShadow(agent.id);
-
-  const id = crypto.randomUUID();
-  const now = Date.now();
-  const suffix = agent.exec.kind === "subprocess" ? "subprocess" : "mock";
-  const name = `${agent.name} (${suffix})`;
-  await db.insert(runs).values({
-    id,
-    agentId: agent.id,
-    name,
-    status: "running",
-    progress: 0,
-    startedAt: now,
-    inputsJson: JSON.stringify(rawInputs ?? {}),
-    model
-  });
-
-  const task: RunningTask = {
-    id,
-    agentId: agent.id,
-    name,
-    status: "running",
-    progress: 0,
-    startedAt: new Date(now).toISOString()
-  };
-
-  // Fire-and-forget: kick off the in-process run engine. Engine writes
-  // terminal state to the runs row and publishes events.
-  const handle = startRun(agent.id, id, rawInputs ?? {}, { model });
-  handle.promise.catch(() => {
-    /* errors already persisted/published */
-  });
-
-  res.json(task);
+  const result = await dispatchAgentRun(
+    req.params.id as string,
+    rawInputs,
+    requestedModel
+  );
+  if (!result.ok) {
+    res.status(404).json({ error: result.error });
+    return;
+  }
+  res.json(result.task);
 });
 
 // ---------- /api/running -------------------------------------------------

@@ -10,6 +10,7 @@ import type {
   ChannelKindDescriptor,
   ChannelMessageSummary,
   ChannelSummary,
+  CommandSummary,
   Conversation,
   ConversationSummary,
   EndpointSummary,
@@ -208,7 +209,19 @@ export const api = {
       fetch(`/api/channels/${id}/disable`, { method: "POST" })
     ),
   deleteChannel: (id: string) =>
-    jVoid(fetch(`/api/channels/${id}`, { method: "DELETE" }))
+    jVoid(fetch(`/api/channels/${id}`, { method: "DELETE" })),
+
+  // commands (the unified verb surface — REST + chat dispatch share this)
+  listCommands: () => j<CommandSummary[]>(fetch("/api/commands")),
+  getCommand: (id: string) => j<CommandSummary>(fetch(`/api/commands/${id}`)),
+  dispatchCommand: <T = unknown>(id: string, input: Record<string, unknown>) =>
+    j<T>(
+      fetch(`/api/commands/${id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input)
+      })
+    )
 };
 
 export type ChannelCreateInput = {

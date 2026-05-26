@@ -273,3 +273,12 @@ export type ChannelMessageSummary = {
   correlationId: string | null;
   createdAt: string;
 };
+
+// ---------- commands ----------------------------------------------------
+
+export type CommandSummary = {
+  id: string;
+  title: string;
+  description: string;
+  inputs: AgentInput[];
+};
