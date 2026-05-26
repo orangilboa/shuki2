@@ -22,6 +22,10 @@ export default function RunView({ runId }: { runId: string }) {
   const answeredInteractions = useStore(s => s.answeredInteractions);
   const submitInteractionResponse = useStore(s => s.submitInteractionResponse);
   const loadInteractionsForRun = useStore(s => s.loadInteractionsForRun);
+  const runRow = useStore(s => s.running.find(r => r.id === runId));
+  const cancelling = useStore(s => s.cancelling[runId] ?? false);
+  const cancelRun = useStore(s => s.cancelRun);
+  const [cancelError, setCancelError] = useState<string | null>(null);
   const [localEvents, setLocalEvents] = useState<RunEventEnvelope[]>([]);
   const [connected, setConnected] = useState(false);
   const [activeTab, setActiveTab] = useState<TabId>("logs");
@@ -118,10 +122,29 @@ export default function RunView({ runId }: { runId: string }) {
   return (
     <div className="view">
       <div className="view-header">
-        <h2>Run {runId.slice(0, 8)}…</h2>
+        <div className="view-header-row">
+          <h2>Run {runId.slice(0, 8)}…</h2>
+          {runRow && (runRow.status === "running" || runRow.status === "queued") && (
+            <button
+              type="button"
+              className="btn danger"
+              disabled={cancelling}
+              onClick={() => {
+                setCancelError(null);
+                cancelRun(runId).catch(err =>
+                  setCancelError(err instanceof Error ? err.message : String(err))
+                );
+              }}
+              title="Stop this run (SIGTERM, then SIGKILL after 1s)"
+            >
+              {cancelling ? "Stopping…" : "Stop"}
+            </button>
+          )}
+        </div>
         <p className="muted">
           {connected ? "live" : "disconnected"} · {events.length} event(s)
         </p>
+        {cancelError && <div className="error-text">{cancelError}</div>}
       </div>
 
       <Tabs
