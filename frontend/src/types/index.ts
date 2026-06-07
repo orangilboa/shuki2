@@ -220,3 +220,12 @@ export {
   type ChannelMessageKind,
   type ChannelMessageSummary
 } from "openshuki-shared";
+
+// ---------- commands ----------------------------------------------------
+
+export type CommandSummary = {
+  id: string;
+  title: string;
+  description: string;
+  inputs: AgentInput[];
+};
