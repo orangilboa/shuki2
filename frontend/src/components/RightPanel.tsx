@@ -50,7 +50,9 @@ export default function RightPanel() {
     connectFirehose,
     setCenterView,
     pendingInteractionsByRun,
-    loadPendingInteractions
+    loadPendingInteractions,
+    cancelling,
+    cancelRun
   } = useStore();
 
   useEffect(() => {
@@ -102,10 +104,12 @@ export default function RightPanel() {
             {running.map(r => {
               const latest = latestEventByRun[r.id];
               const pendingCount = pendingInteractionsByRun[r.id]?.length ?? 0;
+              const isStoppable = r.status === "running" || r.status === "queued";
+              const isCancelling = cancelling[r.id] ?? false;
               return (
                 <li
                   key={r.id}
-                  className="list-item"
+                  className="list-item with-hover-action"
                   onClick={() => setCenterView({ kind: "run", runId: r.id })}
                   style={{ cursor: "pointer" }}
                 >
@@ -124,7 +128,28 @@ export default function RightPanel() {
                         </span>
                       )}
                     </span>
-                    <span className={`status ${r.status}`}>{r.status}</span>
+                    <span
+                      className="list-item-row-tail"
+                      style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+                    >
+                      {isStoppable && (
+                        <button
+                          type="button"
+                          className="btn-stop-mini"
+                          disabled={isCancelling}
+                          title="Stop this run"
+                          onClick={e => {
+                            e.stopPropagation();
+                            cancelRun(r.id).catch(() => {
+                              // Error is surfaced via cancelling-flag reset; silent here.
+                            });
+                          }}
+                        >
+                          {isCancelling ? "…" : "■"}
+                        </button>
+                      )}
+                      <span className={`status ${r.status}`}>{r.status}</span>
+                    </span>
                   </div>
                   <div className="progress">
                     <div className="progress-bar" style={{ width: `${Math.round(r.progress * 100)}%` }} />
