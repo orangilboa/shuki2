@@ -14,6 +14,8 @@
     "build:frontend": "concurrently -n frontend -c magenta \"cd frontend && pnpm build\"",
     "build:desktop": "pnpm --filter openshuki-backend build && pnpm --filter openshuki-frontend build && pnpm --filter openshuki-desktop package",
     "agents:install": "concurrently -n agents -c yellow \"cd agents && pnpm install && pip install -r requirements.txt\"",
+    "test:e2e": "pnpm --filter openshuki-e2e test",
+    "test:e2e:install": "pnpm --filter openshuki-e2e install:browsers",
     "clean": "node scripts/clean.mjs"
   },
   "devDependencies": {
