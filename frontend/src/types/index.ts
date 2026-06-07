@@ -202,3 +202,21 @@ export type DoneWaitingEventPayload = {
   durationMs?: number;
   ok?: boolean;
 };
+
+// ---------- channels -----------------------------------------------------
+// Wire-facing channel types + the CHANNEL_EVENT_CATEGORIES const are defined
+// once in openshuki-shared and re-exported here for convenience.
+
+export {
+  CHANNEL_EVENT_CATEGORIES,
+  type ChannelDirection,
+  type ChannelSource,
+  type ChannelEventCategory,
+  type ChannelFilter,
+  type ChannelInboundPolicy,
+  type ChannelSummary,
+  type ChannelKindDescriptor,
+  type ChannelMessageDirection,
+  type ChannelMessageKind,
+  type ChannelMessageSummary
+} from "openshuki-shared";

@@ -255,3 +255,64 @@ export const agentInteractions = pgTable(
 
 export type AgentInteractionRow = typeof agentInteractions.$inferSelect;
 export type NewAgentInteractionRow = typeof agentInteractions.$inferInsert;
+
+// ---------- channels ------------------------------------------------------
+
+// User-added communication channels (chat bridges, notifications, etc.).
+// Built-in channels live in config/channels.json and are merged at the API
+// edge (see src/channels/store.ts).
+//
+// `kind` identifies the adapter implementation (e.g. "chat.http-poll",
+// "notifications.windows"); the channel is its config plus runtime state.
+// `direction` declares whether the channel forwards events outbound,
+// accepts commands inbound, or both. Filter/inbound/adapterConfig are
+// JSON blobs stringified at the edge.
+export const channels = pgTable("channels", {
+  id: text("id")
+    .primaryKey()
+    .$defaultFn(() => crypto.randomUUID()),
+  name: text("name").notNull(),
+  kind: text("kind").notNull(),
+  direction: text("direction", { enum: ["in_out", "out_only", "in_only"] }).notNull(),
+  enabled: text("enabled").notNull().default("false"),
+  filterJson: text("filter_json").notNull().default("{}"),
+  inboundJson: text("inbound_json").notNull().default("{}"),
+  adapterConfigJson: text("adapter_config_json").notNull().default("{}"),
+  createdAt: bigintN("created_at").notNull().default(nowMs),
+  updatedAt: bigintN("updated_at").notNull().default(nowMs)
+});
+
+export type ChannelRow = typeof channels.$inferSelect;
+export type NewChannelRow = typeof channels.$inferInsert;
+
+// Per-channel message log: outbound run-event summaries, inbound chat
+// messages, dispatched commands, notifications shown. correlationId ties
+// inbound commands to their outbound replies for chat-style channels.
+export const channelMessages = pgTable(
+  "channel_messages",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    channelId: text("channel_id")
+      .notNull()
+      .references(() => channels.id, { onDelete: "cascade" }),
+    direction: text("direction", { enum: ["in", "out"] }).notNull(),
+    kind: text("kind", {
+      enum: ["command", "event", "chat", "notification"]
+    }).notNull(),
+    payloadJson: text("payload_json").notNull().default("{}"),
+    correlationId: text("correlation_id"),
+    createdAt: bigintN("created_at").notNull().default(nowMs)
+  },
+  (t) => ({
+    chIdx: index("channel_messages_channel_id_idx").on(t.channelId),
+    chTimeIdx: index("channel_messages_channel_id_created_at_idx").on(
+      t.channelId,
+      t.createdAt
+    )
+  })
+);
+
+export type ChannelMessageRow = typeof channelMessages.$inferSelect;
+export type NewChannelMessageRow = typeof channelMessages.$inferInsert;

@@ -141,3 +141,20 @@ export type UserResponseEventPayload = {
   interactionId: string;
   answer: string;
 };
+
+// ---------- channels ----------------------------------------------------
+// Wire-facing channel types are defined once in openshuki-shared and
+// re-exported here so existing backend imports of "../types/index.js" keep
+// resolving.
+
+export type {
+  ChannelDirection,
+  ChannelSource,
+  ChannelEventCategory,
+  ChannelFilter,
+  ChannelInboundPolicy,
+  ChannelSummary,
+  ChannelMessageDirection,
+  ChannelMessageKind,
+  ChannelMessageSummary
+} from "openshuki-shared";
