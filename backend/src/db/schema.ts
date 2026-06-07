@@ -100,6 +100,26 @@ export const agents = pgTable("agents", {
 export type Agent = typeof agents.$inferSelect;
 export type NewAgent = typeof agents.$inferInsert;
 
+// ---------- agent_config --------------------------------------------------
+
+// Persistent, re-runnable per-agent onboarding configuration. One row per
+// agent; `config_json` is a free-form JSON object whose shape the agent
+// defines via its declarative `onboarding` spec (see config/agents.json).
+// The run engine injects this blob into the subprocess as the
+// OPENSHUKI_AGENT_CONFIG env var, and an agent can grow it over time by
+// emitting `config_patch` run events (merged here).
+export const agentConfig = pgTable("agent_config", {
+  agentId: text("agent_id")
+    .primaryKey()
+    .references(() => agents.id, { onDelete: "cascade" }),
+  configJson: text("config_json").notNull().default("{}"),
+  createdAt: bigintN("created_at").notNull().default(nowMs),
+  updatedAt: bigintN("updated_at").notNull().default(nowMs)
+});
+
+export type AgentConfigRow = typeof agentConfig.$inferSelect;
+export type NewAgentConfigRow = typeof agentConfig.$inferInsert;
+
 // ---------- runs ----------------------------------------------------------
 
 export const runs = pgTable(

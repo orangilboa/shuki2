@@ -49,6 +49,23 @@ export type AgentExec =
 
 export type AgentSource = "config" | "user";
 
+// ---------- agent onboarding spec ---------------------------------------
+
+// An onboarding field is the input-spec shape plus a `"string_list"` type
+// (for editable keyword lists like override rules) and an optional `section`
+// grouping label. Agents declare these to collect persistent configuration
+// before/independent of any run (see backend/src/agents/config-store.ts).
+export type OnboardingFieldType = AgentInputType | "string_list";
+
+export type OnboardingField = {
+  name: string;
+  label?: string;
+  type: OnboardingFieldType;
+  default?: string | number | boolean | string[];
+  description?: string;
+  section?: string;
+};
+
 export type Agent = {
   id: string;
   name: string;
@@ -57,6 +74,14 @@ export type Agent = {
   inputs: AgentInput[];
   exec: AgentExec;
   source: AgentSource;
+  // Optional declarative onboarding/config spec. Empty/absent => no config UI.
+  onboarding?: OnboardingField[];
+};
+
+// Response for GET /api/agents/:id/onboarding.
+export type AgentOnboarding = {
+  spec: OnboardingField[];
+  config: Record<string, unknown>;
 };
 
 export type RunStatus = "queued" | "running" | "succeeded" | "failed";

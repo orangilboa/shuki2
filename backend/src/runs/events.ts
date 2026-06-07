@@ -23,7 +23,13 @@ export type RunEventType =
   // effect. Pair by `payload.waitId` when present; otherwise the FE pairs by
   // `node` (most-recent unpaired wait wins).
   | "waiting_for_llm"
-  | "done_waiting";
+  | "done_waiting"
+  // Agent → backend. The agent emits `config_patch` to persist learned
+  // configuration into its agent_config row mid-run (the "learn over time"
+  // primitive). Payload: { set?: Record<string,unknown>, append?:
+  // Record<string,string[]> }. The runner merges it and re-publishes so it's
+  // visible in the run log.
+  | "config_patch";
 
 export type RunEventEnvelope<P = unknown> = {
   runId: string;

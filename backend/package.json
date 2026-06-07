@@ -7,7 +7,11 @@
     "dev": "tsx watch src/server.ts",
     "start": "node dist/server.js",
     "build": "tsc",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "typecheck:test": "tsc -p tsconfig.test.json",
+    "test:e2e": "tsx test/e2e/onboarding.e2e.test.ts && tsx test/e2e/meeting-planner.e2e.test.ts",
+    "test:e2e:onboarding": "tsx test/e2e/onboarding.e2e.test.ts",
+    "test:e2e:planner": "tsx test/e2e/meeting-planner.e2e.test.ts"
   },
   "dependencies": {
     "cors": "^2.8.5",

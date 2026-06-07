@@ -49,6 +49,11 @@ The persisted form in `run_events` stores `payload_json` (text) plus the rest as
 | `done`        | agent/engine/runner → bus | `{ ok: boolean, ... }` | Optional from agents; the runner synthesises one if a process exits without it. After `done` the UI considers the run terminal. |
 | `waiting_for_llm` | agent → bus | `{ waitId?: string, label?: string, model?: string }` | Signals a blocking LLM call. The FE renders a live elapsed-seconds counter until the matching `done_waiting` arrives. Pure UI signal — **no DB side effect**. Pair by `waitId` when present; otherwise the FE pairs by `node` (most-recent unpaired wait wins, LIFO). |
 | `done_waiting`    | agent → bus | `{ waitId?: string, durationMs?: number, ok?: boolean }` | Closes the pair opened by `waiting_for_llm`. `durationMs` is the agent's ground-truth timing; the FE prefers it over wall-clock deltas once available. The bare event is dropped from the central log (the paired waiting row carries its information). |
+| `config_patch`    | agent → runner → bus | `{ set?: Record<string, unknown>, append?: Record<string, string[]> }` | Persists learned onboarding config into the agent's `agent_config` row mid-run (the "learn over time" primitive). The runner merges it (serialised per run): `set` overwrites scalar keys, `append` unions string values into the array at each key. Then re-published verbatim so it's visible in the log. The agent reads its config back via the `OPENSHUKI_AGENT_CONFIG` env var on the next run. See "Agent onboarding/config" below. |
+
+### Agent onboarding/config
+
+An agent may declare an optional `onboarding` spec in its definition (`OnboardingField[]` — the input-spec shape plus a `string_list` type and a `section` grouping label). The user fills it in the Onboarding view; the answers persist in the `agent_config` table (one JSON blob per agent). On every run the engine injects that blob as the `OPENSHUKI_AGENT_CONFIG` env var, which the agent reads via `load_agent_config()` / `loadAgentConfig()`. To grow the config from within a run (e.g. after the user clears an ambiguous case), the agent emits a `config_patch` event via `config_patch(...)` / `configPatch(...)`. Onboarding is always optional and re-runnable.
 
 ## Subprocess agents — the JSONL surface
 

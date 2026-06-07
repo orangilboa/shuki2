@@ -4,6 +4,7 @@ import type { AgentCreateInput, AgentPatchInput } from "../api/client";
 import type {
   Agent,
   AgentInteraction,
+  AgentOnboarding,
   ArtifactEventPayload,
   ArtifactSummary,
   AskUserEventPayload,
@@ -86,6 +87,14 @@ type State = {
   createAgent: (input: AgentCreateInput) => Promise<void>;
   updateAgent: (id: string, patch: AgentPatchInput) => Promise<void>;
   deleteAgent: (id: string) => Promise<void>;
+
+  // onboarding / per-agent config (form state is view-local; these just proxy)
+  loadOnboarding: (id: string) => Promise<AgentOnboarding>;
+  saveAgentConfig: (
+    id: string,
+    config: Record<string, unknown>
+  ) => Promise<Record<string, unknown>>;
+  resetAgentConfig: (id: string) => Promise<void>;
 
   loadEndpoints: () => Promise<void>;
   loadModels: (opts?: { refresh?: boolean }) => Promise<void>;
@@ -220,6 +229,10 @@ export const useStore = create<State>((set, get) => ({
     await api.deleteAgent(id);
     await get().loadAgents();
   },
+
+  loadOnboarding: id => api.getOnboarding(id),
+  saveAgentConfig: (id, config) => api.saveAgentConfig(id, config),
+  resetAgentConfig: id => api.resetAgentConfig(id),
 
   loadEndpoints: async () => {
     const endpoints = await api.listEndpoints();

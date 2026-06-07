@@ -6,7 +6,14 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { Agent } from "../types/index.js";
-import { parseExecJson, parseInputsJson, AgentSpecError, validateAgentExec, validateAgentInputs } from "./spec.js";
+import {
+  parseExecJson,
+  parseInputsJson,
+  AgentSpecError,
+  validateAgentExec,
+  validateAgentInputs,
+  validateOnboarding
+} from "./spec.js";
 
 type RawFile = {
   agents?: unknown;
@@ -56,6 +63,13 @@ function validateOne(raw: unknown): Agent {
     const msg = err instanceof AgentSpecError ? err.message : String(err);
     throw new Error(`[agents/config] agent ${obj.id}: ${msg}`);
   }
+  let onboarding;
+  try {
+    onboarding = validateOnboarding(obj.onboarding);
+  } catch (err) {
+    const msg = err instanceof AgentSpecError ? err.message : String(err);
+    throw new Error(`[agents/config] agent ${obj.id}: ${msg}`);
+  }
   return {
     id: obj.id,
     name: obj.name,
@@ -63,7 +77,8 @@ function validateOne(raw: unknown): Agent {
     model,
     inputs,
     exec,
-    source: "config"
+    source: "config",
+    ...(onboarding.length > 0 ? { onboarding } : {})
   };
 }
 

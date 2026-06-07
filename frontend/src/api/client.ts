@@ -3,6 +3,7 @@ import type {
   AgentExec,
   AgentInput,
   AgentInteraction,
+  AgentOnboarding,
   ArtifactSummary,
   ChannelDirection,
   ChannelFilter,
@@ -118,6 +119,21 @@ export const api = {
     ),
   deleteAgent: (id: string) =>
     jVoid(fetch(`/api/agents/${id}`, { method: "DELETE" })),
+
+  // onboarding / per-agent config
+  getOnboarding: (id: string) =>
+    j<AgentOnboarding>(fetch(`/api/agents/${id}/onboarding`)),
+  saveAgentConfig: (id: string, config: Record<string, unknown>) =>
+    j<Record<string, unknown>>(
+      fetch(`/api/agents/${id}/config`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ config })
+      })
+    ),
+  resetAgentConfig: (id: string) =>
+    jVoid(fetch(`/api/agents/${id}/config`, { method: "DELETE" })),
+
   listRunning: () => j<RunningTask[]>(fetch("/api/running")),
   runAgent: (
     id: string,

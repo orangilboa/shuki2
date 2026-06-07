@@ -49,6 +49,17 @@ export type AgentExec =
 
 export type AgentSource = "config" | "user";
 
+export type OnboardingFieldType = AgentInputType | "string_list";
+
+export type OnboardingField = {
+  name: string;
+  label?: string;
+  type: OnboardingFieldType;
+  default?: string | number | boolean | string[];
+  description?: string;
+  section?: string;
+};
+
 export type Agent = {
   id: string;
   name: string;
@@ -57,6 +68,12 @@ export type Agent = {
   inputs: AgentInput[];
   exec: AgentExec;
   source: AgentSource;
+  onboarding?: OnboardingField[];
+};
+
+export type AgentOnboarding = {
+  spec: OnboardingField[];
+  config: Record<string, unknown>;
 };
 
 export type RunningTask = {
@@ -74,6 +91,7 @@ export type CenterView =
   | { kind: "new-chat" }
   | { kind: "conversation"; conversationId: string }
   | { kind: "agent"; agentId: string }
+  | { kind: "onboarding"; agentId: string }
   | { kind: "scheduled"; taskId: string }
   | { kind: "run"; runId: string }
   | { kind: "settings" };
@@ -121,7 +139,8 @@ export type RunEventType =
   | "ask_user"
   | "user_response"
   | "waiting_for_llm"
-  | "done_waiting";
+  | "done_waiting"
+  | "config_patch";
 
 export type RunEventEnvelope<P = unknown> = {
   runId: string;

@@ -39,6 +39,8 @@ export default function AgentView({ agentId }: { agentId: string }) {
   const agent = useStore(s => s.agents.find(a => a.id === agentId));
   const runAgent = useStore(s => s.runAgent);
   const loadRunning = useStore(s => s.loadRunning);
+  const setCenterView = useStore(s => s.setCenterView);
+  const hasOnboarding = !!agent?.onboarding && agent.onboarding.length > 0;
 
   const initialValues = useMemo<Record<string, FieldValue>>(() => {
     const out: Record<string, FieldValue> = {};
@@ -84,6 +86,14 @@ export default function AgentView({ agentId }: { agentId: string }) {
           {agent.source === "config" && <span className="status">built-in</span>}
         </h2>
         <p className="muted">{agent.description}</p>
+        {hasOnboarding && (
+          <button
+            className="btn ghost"
+            onClick={() => setCenterView({ kind: "onboarding", agentId })}
+          >
+            ⚙ Configure / Onboarding
+          </button>
+        )}
       </div>
       <div className="form">
         <label className="field">

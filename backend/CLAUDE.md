@@ -107,6 +107,16 @@ When extending, never block the main loop — copy files / heavy I/O via the art
 4. Add to `frontend/src/api/client.ts` mirror.
 5. If it returns errors as JSON, use `res.status(<code>).json({ error: "<machine_readable_code>" })`. The frontend's `j<T>()` surfaces the `error` string as the thrown `Error.message`.
 
+### Testing (e2e)
+
+There is an e2e suite under `backend/test/e2e/` using Node's built-in `node:test` run via `tsx` (no new dependency). The harness (`harness.ts`) boots the real backend in-process via `start(0)` from `server.ts` (which now auto-starts only when invoked directly — guarded by an `import.meta.url`/`argv[1]` check — so it's importable by tests) and drives it over HTTP. Meeting-planner tests spawn the real Python subprocess agent; nothing is mocked.
+
+- `pnpm test:e2e` — both suites (`onboarding`, `meeting-planner`).
+- `pnpm test:e2e:onboarding` / `:planner` — individually.
+- `pnpm typecheck:test` — type-checks `src` + `test` via `tsconfig.test.json`.
+
+Prereqs: Postgres at `DB_URL` (as for the app) and, for the planner suite, `python` + `langgraph` on PATH (else it skips). Suites reset the agent's config in teardown. See [../docs/test-plan-meeting-planner.md](../docs/test-plan-meeting-planner.md).
+
 ### Migration policy
 
 The startup script in `db/migrate.ts` is a hand-written idempotent DDL block: `CREATE TABLE IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS`. Every boot runs it inside a transaction. To add a column or table, edit BOTH `schema.ts` (Drizzle types) AND `migrate.ts` (actual DDL). For destructive changes (drop column, change type), use `psql` directly — the runtime script never alters or drops. See [../docs/db.md](../docs/db.md).
