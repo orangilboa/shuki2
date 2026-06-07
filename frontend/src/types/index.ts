@@ -1,89 +1,12 @@
-export type ConversationSummary = {
-  id: string;
-  title: string;
-  updatedAt: string;
-  preview: string;
-  model: string | null;
-};
+// Shared API types live once in openshuki-shared and are re-exported here so
+// the frontend can't drift from the backend's REST surface. Only UI-only
+// shapes (view routing, frontend-rendered event payloads) are defined locally.
 
-export type ChatMessage = {
-  id: string;
-  role: "user" | "assistant" | "system";
-  content: string;
-  createdAt: string;
-};
+export * from "openshuki-shared";
 
-export type Conversation = ConversationSummary & {
-  messages: ChatMessage[];
-};
+import type { ArtifactKind } from "openshuki-shared";
 
-export type ScheduledTask = {
-  id: string;
-  name: string;
-  cron: string;
-  nextRun: string;
-  description: string;
-};
-
-export type AgentInputType = "string" | "number" | "boolean";
-
-export type AgentInput = {
-  name: string;
-  label?: string;
-  type: AgentInputType;
-  required?: boolean;
-  default?: string | number | boolean;
-  description?: string;
-};
-
-export type AgentExec =
-  | { kind: "mock" }
-  | {
-      kind: "subprocess";
-      command: string;
-      args: string[];
-      cwd?: string;
-      env?: Record<string, string>;
-      protocol: "jsonl" | "raw";
-    };
-
-export type AgentSource = "config" | "user";
-
-export type OnboardingFieldType = AgentInputType | "string_list";
-
-export type OnboardingField = {
-  name: string;
-  label?: string;
-  type: OnboardingFieldType;
-  default?: string | number | boolean | string[];
-  description?: string;
-  section?: string;
-};
-
-export type Agent = {
-  id: string;
-  name: string;
-  description: string;
-  model: string | null;
-  inputs: AgentInput[];
-  exec: AgentExec;
-  source: AgentSource;
-  onboarding?: OnboardingField[];
-};
-
-export type AgentOnboarding = {
-  spec: OnboardingField[];
-  config: Record<string, unknown>;
-};
-
-export type RunningTask = {
-  id: string;
-  agentId: string;
-  name: string;
-  status: "queued" | "running" | "succeeded" | "failed";
-  progress: number;
-  startedAt: string;
-};
+// ---------- UI-only view routing -----------------------------------------
 
 export type LeftTab = "chats" | "scheduled" | "agents";
 
@@ -96,76 +19,7 @@ export type CenterView =
   | { kind: "run"; runId: string }
   | { kind: "settings" };
 
-// ---------- endpoints / models -------------------------------------------
-
-export type EndpointSource = "config" | "user";
-
-export type EndpointSummary = {
-  id: string;
-  displayName: string;
-  baseUrl: string;
-  source: EndpointSource;
-  hasKey: boolean;
-  apiKeyMasked: string | null;
-};
-
-export type ModelInfo = { id: string; ownedBy?: string };
-
-export type EndpointModels = {
-  endpointId: string;
-  displayName: string;
-  source: EndpointSource;
-  ok: boolean;
-  error: string | null;
-  fetchedAt: string;
-  models: ModelInfo[];
-};
-
-export type ModelsResponse = EndpointModels[];
-
-// ---------- run streaming -------------------------------------------------
-
-export type RunEventType =
-  | "run_started"
-  | "node_start"
-  | "node_end"
-  | "token"
-  | "tool_call"
-  | "tool_result"
-  | "custom"
-  | "error"
-  | "done"
-  | "artifact"
-  | "ask_user"
-  | "user_response"
-  | "waiting_for_llm"
-  | "done_waiting"
-  | "config_patch";
-
-export type RunEventEnvelope<P = unknown> = {
-  runId: string;
-  seq: number;
-  ts: number;
-  type: RunEventType;
-  node: string | null;
-  payload: P;
-};
-
-// ---------- artifacts ----------------------------------------------------
-
-export type ArtifactKind = "md" | "text" | "image" | "audio" | "video";
-
-export type ArtifactSummary = {
-  id: string;
-  runId: string;
-  seq: number;
-  name: string;
-  kind: ArtifactKind;
-  mime: string;
-  bytes: number;
-  hasInlineContent: boolean;
-  createdAt: string;
-};
+// ---------- frontend-rendered event payloads -----------------------------
 
 export type ArtifactEventPayload = {
   artifactId: string;
@@ -175,34 +29,6 @@ export type ArtifactEventPayload = {
   bytes: number;
   hasInlineContent: boolean;
 };
-
-// ---------- agent ↔ user interactions -----------------------------------
-
-export type AgentInteractionStatus = "pending" | "answered" | "cancelled";
-
-export type AgentInteraction = {
-  id: string;
-  runId: string;
-  prompt: string;
-  choices: string[] | null;
-  status: AgentInteractionStatus;
-  answer: string | null;
-  createdAt: string;
-  answeredAt: string | null;
-};
-
-export type AskUserEventPayload = {
-  interactionId: string;
-  prompt: string;
-  choices?: string[];
-};
-
-export type UserResponseEventPayload = {
-  interactionId: string;
-  answer: string;
-};
-
-// ---------- LLM wait events ----------------------------------------------
 
 /**
  * Emitted by an agent when it begins a blocking LLM call. The frontend
@@ -220,31 +46,4 @@ export type DoneWaitingEventPayload = {
   waitId?: string;
   durationMs?: number;
   ok?: boolean;
-};
-
-// ---------- channels -----------------------------------------------------
-// Wire-facing channel types + the CHANNEL_EVENT_CATEGORIES const are defined
-// once in openshuki-shared and re-exported here for convenience.
-
-export {
-  CHANNEL_EVENT_CATEGORIES,
-  type ChannelDirection,
-  type ChannelSource,
-  type ChannelEventCategory,
-  type ChannelFilter,
-  type ChannelInboundPolicy,
-  type ChannelSummary,
-  type ChannelKindDescriptor,
-  type ChannelMessageDirection,
-  type ChannelMessageKind,
-  type ChannelMessageSummary
-} from "openshuki-shared";
-
-// ---------- commands ----------------------------------------------------
-
-export type CommandSummary = {
-  id: string;
-  title: string;
-  description: string;
-  inputs: AgentInput[];
 };

@@ -420,6 +420,20 @@ export async function runSubprocess(args: RunSubprocessArgs): Promise<void> {
   let killTimer: NodeJS.Timeout | null = null;
   const onAbort = () => {
     if (child.exitCode !== null || child.signalCode !== null) return;
+    // On Windows we spawn through cmd.exe (shell:true) so `.cmd` shims resolve.
+    // `child.kill()` only signals the shell, orphaning the real agent process
+    // (which keeps the stdout pipe open, so `close` never fires and the run is
+    // stuck "running"). Kill the whole tree with taskkill /T instead.
+    if (onWindows && child.pid !== undefined) {
+      try {
+        spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
+          windowsHide: true
+        });
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
     try {
       child.kill("SIGTERM");
     } catch {
