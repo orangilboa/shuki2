@@ -77,6 +77,11 @@ type State = {
     inputs?: Record<string, unknown>,
     model?: string | null
   ) => Promise<void>;
+  cancelRun: (runId: string) => Promise<void>;
+
+  // Per-run UI flag set while a cancel request is in flight. The canonical
+  // `failed` status arrives later via the SSE `done`/`error` event.
+  cancelling: Record<string, boolean>;
 
   createAgent: (input: AgentCreateInput) => Promise<void>;
   updateAgent: (id: string, patch: AgentPatchInput) => Promise<void>;
@@ -139,6 +144,8 @@ export const useStore = create<State>((set, get) => ({
   modelsLoading: false,
   modelsError: null,
 
+  cancelling: {},
+
   toggleLeft: () => set(s => ({ leftCollapsed: !s.leftCollapsed })),
   toggleRight: () => set(s => ({ rightCollapsed: !s.rightCollapsed })),
   setLeftTab: t => set({ leftTab: t }),
@@ -180,6 +187,23 @@ export const useStore = create<State>((set, get) => ({
   runAgent: async (agentId, inputs, model) => {
     const task = await api.runAgent(agentId, inputs ?? {}, model);
     set(s => ({ running: [task, ...s.running] }));
+  },
+
+  cancelRun: async runId => {
+    if (get().cancelling[runId]) return;
+    set(s => ({ cancelling: { ...s.cancelling, [runId]: true } }));
+    try {
+      await api.cancelRun(runId);
+    } catch (err) {
+      set(s => {
+        const next = { ...s.cancelling };
+        delete next[runId];
+        return { cancelling: next };
+      });
+      throw err;
+    }
+    // Leave the cancelling flag true; the SSE `done`/`error` ingest will move
+    // the run out of `running`, so the per-row button unmounts on its own.
   },
 
   createAgent: async input => {
@@ -349,13 +373,22 @@ export const useStore = create<State>((set, get) => ({
         }
       }
 
+      // Terminal events clear the cancelling flag so a stale flag never
+      // outlives the run.
+      let nextCancelling = s.cancelling;
+      if ((ev.type === "done" || ev.type === "error") && s.cancelling[ev.runId]) {
+        nextCancelling = { ...s.cancelling };
+        delete nextCancelling[ev.runId];
+      }
+
       return {
         events: { ...s.events, [ev.runId]: nextBuf },
         latestEventByRun: { ...s.latestEventByRun, [ev.runId]: ev },
         running,
         artifactsByRun: nextArtifactsByRun,
         pendingInteractionsByRun: nextPending,
-        answeredInteractions: nextAnswers
+        answeredInteractions: nextAnswers,
+        cancelling: nextCancelling
       };
     });
   },

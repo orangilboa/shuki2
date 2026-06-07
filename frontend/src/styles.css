@@ -254,6 +254,47 @@ body {
   color: #0a0d18;
 }
 .btn.ghost { background: transparent; }
+.btn.danger {
+  background: transparent;
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.btn.danger:hover { background: #261515; border-color: var(--danger); }
+
+/* RunView header — stop button sits next to the title. */
+.view-header-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+/* Per-row mini stop control (right panel). Hidden until the row is hovered
+   to avoid mis-clicks in the dense list. */
+.list-item.with-hover-action .btn-stop-mini {
+  visibility: hidden;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--danger);
+  border-radius: 4px;
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 6px;
+  cursor: pointer;
+}
+.list-item.with-hover-action:hover .btn-stop-mini,
+.list-item.with-hover-action .btn-stop-mini:disabled,
+.list-item.with-hover-action .btn-stop-mini:focus-visible {
+  visibility: visible;
+}
+.list-item.with-hover-action .btn-stop-mini:hover {
+  border-color: var(--danger);
+  background: #261515;
+}
+.list-item.with-hover-action .btn-stop-mini:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 .link-btn {
   background: transparent;
   border: none;

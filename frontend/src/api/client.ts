@@ -131,6 +131,10 @@ export const api = {
         body: JSON.stringify({ inputs, model: model ?? null })
       })
     ),
+  cancelRun: (runId: string) =>
+    j<{ ok: boolean; mode: "signal" | "direct" | "noop" }>(
+      fetch(`/api/runs/${runId}/cancel`, { method: "POST" })
+    ),
 
   // endpoints
   listEndpoints: () => j<EndpointSummary[]>(fetch("/api/endpoints")),
