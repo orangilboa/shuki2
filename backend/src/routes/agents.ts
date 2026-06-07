@@ -12,7 +12,60 @@ import {
   updateUserAgent
 } from "../agents/store.js";
 import { AgentSpecError, validateAgentExec, validateAgentInputs } from "../agents/spec.js";
-import type { Agent, RunningTask, ScheduledTask } from "../types/index.js";
+import { getConfig, resetConfig, setConfig } from "../agents/config-store.js";
+import type {
+  Agent,
+  AgentOnboarding,
+  OnboardingField,
+  RunningTask,
+  ScheduledTask
+} from "../types/index.js";
+
+// Coerce a raw body value to the field's declared type. Unknown/invalid values
+// fall back to the field default (or a type-appropriate empty value).
+function coerceOnboardingValue(field: OnboardingField, raw: unknown): unknown {
+  switch (field.type) {
+    case "number": {
+      if (typeof raw === "number" && Number.isFinite(raw)) return raw;
+      if (typeof raw === "string" && raw.trim() !== "" && !Number.isNaN(Number(raw))) {
+        return Number(raw);
+      }
+      return typeof field.default === "number" ? field.default : 0;
+    }
+    case "boolean":
+      return typeof raw === "boolean"
+        ? raw
+        : typeof field.default === "boolean"
+          ? field.default
+          : false;
+    case "string_list":
+      return Array.isArray(raw)
+        ? raw.filter((x): x is string => typeof x === "string")
+        : Array.isArray(field.default)
+          ? field.default
+          : [];
+    case "string":
+    default:
+      return typeof raw === "string"
+        ? raw
+        : typeof field.default === "string"
+          ? field.default
+          : "";
+  }
+}
+
+// Build a config object from the request body, keyed strictly by the agent's
+// onboarding spec (unknown keys are ignored).
+function buildConfigFromSpec(
+  spec: OnboardingField[],
+  body: Record<string, unknown>
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const field of spec) {
+    out[field.name] = coerceOnboardingValue(field, body[field.name]);
+  }
+  return out;
+}
 
 // ---------- /api/scheduled -----------------------------------------------
 
@@ -158,6 +211,55 @@ agentsRouter.delete("/:id", async (req: Request, res: Response) => {
     res.status(404).json({ error: "not_found" });
     return;
   }
+  res.status(204).end();
+});
+
+// ---------- onboarding / per-agent config --------------------------------
+
+agentsRouter.get("/:id/onboarding", async (req: Request, res: Response) => {
+  const id = req.params.id as string;
+  const agent = await findAgentById(id);
+  if (!agent) {
+    res.status(404).json({ error: "not_found" });
+    return;
+  }
+  const out: AgentOnboarding = {
+    spec: agent.onboarding ?? [],
+    config: await getConfig(id)
+  };
+  res.json(out);
+});
+
+agentsRouter.put("/:id/config", async (req: Request, res: Response) => {
+  const id = req.params.id as string;
+  const agent = await findAgentById(id);
+  if (!agent) {
+    res.status(404).json({ error: "not_found" });
+    return;
+  }
+  const spec = agent.onboarding ?? [];
+  if (spec.length === 0) {
+    res.status(400).json({ error: "agent_has_no_onboarding" });
+    return;
+  }
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  // Accept either a flat body or an explicit { config } wrapper.
+  const raw =
+    body.config && typeof body.config === "object" && !Array.isArray(body.config)
+      ? (body.config as Record<string, unknown>)
+      : body;
+  const saved = await setConfig(id, buildConfigFromSpec(spec, raw));
+  res.json(saved);
+});
+
+agentsRouter.delete("/:id/config", async (req: Request, res: Response) => {
+  const id = req.params.id as string;
+  const agent = await findAgentById(id);
+  if (!agent) {
+    res.status(404).json({ error: "not_found" });
+    return;
+  }
+  await resetConfig(id);
   res.status(204).end();
 });
 

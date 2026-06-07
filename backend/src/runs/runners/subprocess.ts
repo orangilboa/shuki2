@@ -20,6 +20,7 @@ import { runs } from "../../db/schema.js";
 import type { AgentExec, AgentInput } from "../../types/index.js";
 import { flush, publish } from "../bus.js";
 import { persistArtifact, type RawArtifactPayload } from "../artifacts.js";
+import { mergeConfigPatch, type ConfigPatch } from "../../agents/config-store.js";
 import type { RunEventType } from "../events.js";
 import {
   cancelPendingForRun,
@@ -43,7 +44,8 @@ const KNOWN_EVENT_TYPES: ReadonlySet<RunEventType> = new Set<RunEventType>([
   "ask_user",
   "user_response",
   "waiting_for_llm",
-  "done_waiting"
+  "done_waiting",
+  "config_patch"
 ]);
 
 export type RunSubprocessArgs = {
@@ -53,6 +55,8 @@ export type RunSubprocessArgs = {
   exec: Extract<AgentExec, { kind: "subprocess" }>;
   inputs: Record<string, unknown>;
   inputSpec?: AgentInput[];
+  // The agent's persisted onboarding config, injected as OPENSHUKI_AGENT_CONFIG.
+  agentConfigJson?: string;
   model: string | null;
   signal: AbortSignal;
 };
@@ -148,6 +152,9 @@ export async function runSubprocess(args: RunSubprocessArgs): Promise<void> {
       expandedEnv[k] = expandEnvValue(v, inputs, inputSpec, agentsDir);
     }
   }
+  // Inject the agent's persisted onboarding config (always present, defaults to
+  // "{}") so the agent can read it from a single well-known env var.
+  expandedEnv.OPENSHUKI_AGENT_CONFIG = args.agentConfigJson ?? "{}";
 
   // ---------- state ----------
   let doneEmitted = false;
@@ -164,6 +171,9 @@ export async function runSubprocess(args: RunSubprocessArgs): Promise<void> {
   // Same idea for interactions: persisting the row before publishing the
   // event keeps DB and event-log ordering aligned for late subscribers.
   let interactionQueue: Promise<void> = Promise.resolve();
+  // Serialize config_patch merges so concurrent learned-rule writes don't
+  // race on the read-modify-write of the agent_config row.
+  let configQueue: Promise<void> = Promise.resolve();
 
   async function finalize(opts: {
     ok: boolean;
@@ -345,6 +355,26 @@ export async function runSubprocess(args: RunSubprocessArgs): Promise<void> {
             });
             return;
           }
+          if (evType === "config_patch") {
+            // Persist the learned config into the agent's agent_config row,
+            // then re-publish so the patch is visible in the run log.
+            const patch: ConfigPatch =
+              payload && typeof payload === "object"
+                ? (payload as ConfigPatch)
+                : {};
+            configQueue = configQueue.then(async () => {
+              try {
+                await mergeConfigPatch(args.agentId, patch);
+              } catch (err) {
+                const reason = err instanceof Error ? err.message : String(err);
+                publishEvent("token", null, {
+                  text: `[config_patch failed: ${reason}]`
+                });
+              }
+            });
+            publishEvent(evType, node, payload);
+            return;
+          }
           publishEvent(evType, node, payload);
           // Side-effect: progress updates from node_end → runs.progress.
           if (
@@ -448,6 +478,12 @@ export async function runSubprocess(args: RunSubprocessArgs): Promise<void> {
       // we cancel the still-pending ones below.
       try {
         await interactionQueue;
+      } catch {
+        // best-effort
+      }
+      // Drain learned-config writes so they're committed before the run ends.
+      try {
+        await configQueue;
       } catch {
         // best-effort
       }

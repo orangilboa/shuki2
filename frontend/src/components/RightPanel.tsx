@@ -35,6 +35,8 @@ function eventLine(ev: ReturnType<typeof useStore.getState>["latestEventByRun"][
     }
     case "done_waiting":
       return `${node}✓ LLM done`;
+    case "config_patch":
+      return `${node}🧠 learned a rule`;
     default:
       return `${node}${ev.type}`;
   }

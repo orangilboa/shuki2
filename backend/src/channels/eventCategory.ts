@@ -16,6 +16,7 @@ const TABLE: Record<RunEventType, ChannelEventCategory> = {
   artifact: "run.artifacts",
   ask_user: "run.interactions",
   user_response: "run.interactions",
+  config_patch: "run.interactions",
   error: "run.errors",
   waiting_for_llm: "run.llm_wait",
   done_waiting: "run.llm_wait"

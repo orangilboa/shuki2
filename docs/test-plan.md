@@ -11,6 +11,8 @@ Tests are tagged with the PR that introduced or owns the surface under test:
 
 Manual unless marked `(automatable)`. Run tests with the matching PR's branch checked out, or against `main` once everything is merged.
 
+> **Feature-specific plans:** [test-plan-meeting-planner.md](test-plan-meeting-planner.md) covers agent onboarding + the meeting-planner agent, and includes the first **automated e2e suite** (`backend/test/e2e/`, run via `pnpm --filter openshuki-backend test:e2e`).
+
 ---
 
 ## 0. Setup (do this once)

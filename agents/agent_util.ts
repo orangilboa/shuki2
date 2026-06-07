@@ -30,7 +30,8 @@ export type EventType =
   | "ask_user"
   | "user_response"
   | "waiting_for_llm"
-  | "done_waiting";
+  | "done_waiting"
+  | "config_patch";
 
 export type EventLine = {
   type: EventType;
@@ -88,6 +89,34 @@ export function emitError(message: string, extra: Record<string, unknown> = {}):
  */
 export function done(ok = true, extra: Record<string, unknown> = {}): void {
   emit({ type: "done", payload: { ok, ...extra } });
+}
+
+// ---------- agent config (onboarding) -----------------------------------
+//
+// The backend injects the agent's persisted onboarding config as the
+// OPENSHUKI_AGENT_CONFIG env var (a JSON object). Read it with
+// `loadAgentConfig()`. Grow it over time by emitting `configPatch(...)`:
+// `set` overwrites scalar keys, `append` unions string values into list keys.
+// The backend merges the patch into the agent_config row immediately.
+
+export function loadAgentConfig(): Record<string, unknown> {
+  const raw = process.env.OPENSHUKI_AGENT_CONFIG;
+  if (!raw) return {};
+  try {
+    const obj = JSON.parse(raw);
+    return obj && typeof obj === "object" && !Array.isArray(obj)
+      ? (obj as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+export function configPatch(
+  patch: { set?: Record<string, unknown>; append?: Record<string, string[]> },
+  node?: string
+): void {
+  emit({ type: "config_patch", node: node ?? null, payload: patch });
 }
 
 // ---------- artifacts ------------------------------------------------------

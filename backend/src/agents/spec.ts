@@ -5,7 +5,13 @@
 // `validateAgentInputs` / `validateAgentExec` which DO throw with a typed
 // error so the route can map to a 400 response.
 
-import type { AgentExec, AgentInput, AgentInputType } from "../types/index.js";
+import type {
+  AgentExec,
+  AgentInput,
+  AgentInputType,
+  OnboardingField,
+  OnboardingFieldType
+} from "../types/index.js";
 
 export class AgentSpecError extends Error {
   constructor(message: string) {
@@ -207,6 +213,99 @@ export function validateAgentExec(raw: unknown): AgentExec {
     out.env = env;
   }
   return out;
+}
+
+// ---------- onboarding spec ----------------------------------------------
+
+const ONBOARDING_TYPES: readonly OnboardingFieldType[] = [
+  "string",
+  "number",
+  "boolean",
+  "string_list"
+];
+
+function isOnboardingType(v: unknown): v is OnboardingFieldType {
+  return (
+    typeof v === "string" &&
+    (ONBOARDING_TYPES as readonly string[]).includes(v)
+  );
+}
+
+function isStringArray(v: unknown): v is string[] {
+  return Array.isArray(v) && v.every((x) => typeof x === "string");
+}
+
+/** Lenient read-path parser. Malformed entries are skipped; never throws. */
+export function parseOnboardingJson(
+  json: string | null | undefined
+): OnboardingField[] {
+  if (!json) return [];
+  let raw: unknown;
+  try {
+    raw = JSON.parse(json);
+  } catch {
+    return [];
+  }
+  return normalizeOnboarding(raw, false);
+}
+
+/** Throwing write-path validator (config loader + future CRUD). */
+export function validateOnboarding(raw: unknown): OnboardingField[] {
+  return normalizeOnboarding(raw, true);
+}
+
+function normalizeOnboarding(raw: unknown, strict: boolean): OnboardingField[] {
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw)) {
+    if (strict) throw new AgentSpecError("onboarding must be an array");
+    return [];
+  }
+  const out: OnboardingField[] = [];
+  const seen = new Set<string>();
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") {
+      if (strict) throw new AgentSpecError("each onboarding field must be an object");
+      continue;
+    }
+    const obj = entry as Record<string, unknown>;
+    if (typeof obj.name !== "string" || obj.name.length === 0) {
+      if (strict) throw new AgentSpecError("onboarding field.name must be a non-empty string");
+      continue;
+    }
+    if (seen.has(obj.name)) {
+      if (strict) throw new AgentSpecError(`duplicate onboarding field: ${obj.name}`);
+      continue;
+    }
+    if (!isOnboardingType(obj.type)) {
+      if (strict) {
+        throw new AgentSpecError(
+          `onboarding ${obj.name}: type must be one of ${ONBOARDING_TYPES.join("|")}`
+        );
+      }
+      continue;
+    }
+    seen.add(obj.name);
+    const item: OnboardingField = { name: obj.name, type: obj.type };
+    if (typeof obj.label === "string") item.label = obj.label;
+    if (typeof obj.description === "string") item.description = obj.description;
+    if (typeof obj.section === "string") item.section = obj.section;
+    if (obj.default !== undefined) {
+      if (obj.type === "string_list") {
+        if (isStringArray(obj.default)) item.default = obj.default;
+        else if (strict) throw new AgentSpecError(`onboarding ${obj.name}: default must be string[]`);
+      } else if (isStringNumberBool(obj.default)) {
+        item.default = obj.default;
+      } else if (strict) {
+        throw new AgentSpecError(`onboarding ${obj.name}: default must be string|number|boolean`);
+      }
+    }
+    out.push(item);
+  }
+  return out;
+}
+
+export function onboardingToJson(fields: OnboardingField[]): string {
+  return JSON.stringify(fields);
 }
 
 export function execToJson(exec: AgentExec): string {

@@ -47,6 +47,13 @@ CREATE TABLE IF NOT EXISTS agents (
   created_at   bigint NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint
 );
 
+CREATE TABLE IF NOT EXISTS agent_config (
+  agent_id     text PRIMARY KEY REFERENCES agents(id) ON DELETE CASCADE,
+  config_json  text NOT NULL DEFAULT '{}',
+  created_at   bigint NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint,
+  updated_at   bigint NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint
+);
+
 CREATE TABLE IF NOT EXISTS runs (
   id           text PRIMARY KEY,
   agent_id     text NOT NULL REFERENCES agents(id),
@@ -141,6 +148,7 @@ const TABLE_NAMES = [
   "messages",
   "scheduled_tasks",
   "agents",
+  "agent_config",
   "runs",
   "run_events",
   "endpoints",

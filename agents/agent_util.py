@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import os
 import sys
 import threading
 import time
@@ -162,6 +163,46 @@ def llm_wait(
             ok=True,
             node=node,
         )
+
+
+# ---------- agent config (onboarding) -------------------------------------
+#
+# The backend injects the agent's persisted onboarding config as the
+# OPENSHUKI_AGENT_CONFIG env var (a JSON object). Read it with
+# `load_agent_config()`. Grow it over time by emitting `config_patch(...)`:
+# `set` overwrites scalar keys, `append` unions string values into list keys.
+# The backend merges the patch into the agent_config row immediately.
+
+
+def load_agent_config() -> dict[str, Any]:
+    """Return the agent's persisted onboarding config (or {} if unset)."""
+    raw = os.environ.get("OPENSHUKI_AGENT_CONFIG")
+    if not raw:
+        return {}
+    try:
+        obj = json.loads(raw)
+    except Exception:
+        return {}
+    return obj if isinstance(obj, dict) else {}
+
+
+def config_patch(
+    *,
+    set: dict[str, Any] | None = None,
+    append: dict[str, list[str]] | None = None,
+    node: str | None = None,
+) -> None:
+    """Persist learned configuration into the agent_config row mid-run.
+
+    `set` overwrites scalar keys; `append` unions string values into the
+    existing array at each key (the "learn over time" primitive).
+    """
+    payload: dict[str, Any] = {}
+    if set:
+        payload["set"] = set
+    if append:
+        payload["append"] = append
+    emit("config_patch", node=node, payload=payload)
 
 
 # ---------- artifacts ------------------------------------------------------

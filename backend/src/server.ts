@@ -1,5 +1,6 @@
 import "dotenv/config";
-import express, { type Request, type Response } from "express";
+import { pathToFileURL } from "node:url";
+import express, { type Express, type Request, type Response } from "express";
 import cors from "cors";
 import { conversationsRouter } from "./routes/conversations.js";
 import { runningRouter, scheduledRouter, agentsRouter } from "./routes/agents.js";
@@ -14,37 +15,49 @@ import { commandsRouter } from "./routes/commands.js";
 import { registerBuiltinCommands } from "./commands/builtin.js";
 import { migrate } from "./db/migrate.js";
 
-const app = express();
-app.use(cors());
-app.use(express.json());
-
 const PORT = Number(process.env.PORT ?? 4000);
 
-app.get("/api/health", (_req: Request, res: Response) => {
-  res.json({ ok: true });
-});
+// Build the Express app (routes + middleware) without binding a port. Exported
+// so tests can mount it on an ephemeral port via `start()`.
+export function createApp(): Express {
+  const app = express();
+  app.use(cors());
+  app.use(express.json());
 
-app.use("/api/conversations", conversationsRouter);
-app.use("/api/scheduled", scheduledRouter);
-app.use("/api/agents", agentsRouter);
-app.use("/api/running", runningRouter);
-app.use("/api/runs", runsRouter);
-app.use("/api/interactions", interactionsRouter);
-app.use("/api/artifacts", artifactsRouter);
-app.use("/api/endpoints", endpointsRouter);
-app.use("/api/models", modelsRouter);
-app.use("/api/channels", channelsRouter);
-app.use("/api/commands", commandsRouter);
-app.get("/api/events", eventsFirehose);
+  app.get("/api/health", (_req: Request, res: Response) => {
+    res.json({ ok: true });
+  });
 
-registerBuiltinCommands();
+  app.use("/api/conversations", conversationsRouter);
+  app.use("/api/scheduled", scheduledRouter);
+  app.use("/api/agents", agentsRouter);
+  app.use("/api/running", runningRouter);
+  app.use("/api/runs", runsRouter);
+  app.use("/api/interactions", interactionsRouter);
+  app.use("/api/artifacts", artifactsRouter);
+  app.use("/api/endpoints", endpointsRouter);
+  app.use("/api/models", modelsRouter);
+  app.use("/api/channels", channelsRouter);
+  app.use("/api/commands", commandsRouter);
+  app.get("/api/events", eventsFirehose);
 
-// Run schema sync BEFORE we start accepting requests.
-async function start(): Promise<void> {
+  registerBuiltinCommands();
+  return app;
+}
+
+// Run schema sync + start enabled channels BEFORE accepting requests.
+// Returns the bound http.Server so callers (tests) can close it.
+export async function start(port: number = PORT) {
   await migrate();
   await startEnabledChannels();
-  app.listen(PORT, () => {
-    console.log(`[openshuki-backend] listening on http://localhost:${PORT}`);
+  const app = createApp();
+  return await new Promise<ReturnType<Express["listen"]>>((resolve) => {
+    const server = app.listen(port, () => {
+      const addr = server.address();
+      const boundPort = typeof addr === "object" && addr ? addr.port : port;
+      console.log(`[openshuki-backend] listening on http://localhost:${boundPort}`);
+      resolve(server);
+    });
   });
 }
 
@@ -54,7 +67,15 @@ for (const sig of ["SIGINT", "SIGTERM"] as const) {
   });
 }
 
-start().catch((err: unknown) => {
-  console.error("[openshuki-backend] startup failed:", err);
-  process.exit(1);
-});
+// Auto-start only when invoked directly (e.g. `tsx src/server.ts`,
+// `tsx watch src/server.ts`), not when imported by a test harness.
+const invokedDirectly =
+  process.argv[1] !== undefined &&
+  import.meta.url === pathToFileURL(process.argv[1]).href;
+
+if (invokedDirectly) {
+  start().catch((err: unknown) => {
+    console.error("[openshuki-backend] startup failed:", err);
+    process.exit(1);
+  });
+}

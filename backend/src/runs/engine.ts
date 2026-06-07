@@ -9,6 +9,7 @@ import { eq } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { runs } from "../db/schema.js";
 import { findById as findAgentById } from "../agents/store.js";
+import { getConfig } from "../agents/config-store.js";
 import { publish } from "./bus.js";
 import { runSubprocess } from "./runners/subprocess.js";
 
@@ -105,6 +106,9 @@ export function startRun(
           inputs && typeof inputs === "object" && !Array.isArray(inputs)
             ? (inputs as Record<string, unknown>)
             : {};
+        // Inject the agent's persisted onboarding config so the subprocess can
+        // read it (see runners/subprocess.ts -> OPENSHUKI_AGENT_CONFIG).
+        const config = await getConfig(agentId);
         await runSubprocess({
           runId,
           agentId,
@@ -112,6 +116,7 @@ export function startRun(
           exec: agent.exec,
           inputs: inputsObj,
           inputSpec: agent.inputs,
+          agentConfigJson: JSON.stringify(config),
           model,
           signal: abort.signal
         });

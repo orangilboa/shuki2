@@ -125,6 +125,100 @@
         "cwd": "{AGENTS_DIR}/ask-demo",
         "protocol": "jsonl"
       }
+    },
+    {
+      "id": "meeting-planner",
+      "name": "Meeting planner",
+      "description": "Find a slot and send an Outlook invite to a group, honouring urgency. Asks which clashing meetings can be overridden and learns your rules over time. Mock Outlook COM (Python).",
+      "model": null,
+      "inputs": [
+        {
+          "name": "people",
+          "label": "People",
+          "type": "string",
+          "required": true,
+          "description": "Comma-separated attendees (names or emails)."
+        },
+        {
+          "name": "urgency",
+          "label": "Urgency",
+          "type": "string",
+          "default": "7d",
+          "description": "How soon: asap | 2d | 7d | 30d."
+        },
+        {
+          "name": "subject",
+          "label": "Subject",
+          "type": "string",
+          "default": "Meeting",
+          "description": "Meeting title."
+        },
+        {
+          "name": "duration_min",
+          "label": "Duration (min)",
+          "type": "number",
+          "default": 30,
+          "description": "Meeting length in minutes."
+        }
+      ],
+      "onboarding": [
+        {
+          "name": "workdayStart",
+          "label": "Workday start",
+          "type": "string",
+          "default": "09:00",
+          "section": "Working hours",
+          "description": "Earliest hour to schedule (HH:MM)."
+        },
+        {
+          "name": "workdayEnd",
+          "label": "Workday end",
+          "type": "string",
+          "default": "17:00",
+          "section": "Working hours",
+          "description": "Latest hour a meeting may end (HH:MM)."
+        },
+        {
+          "name": "defaultDurationMin",
+          "label": "Default duration (min)",
+          "type": "number",
+          "default": 30,
+          "section": "Working hours",
+          "description": "Used when you don't override the duration on a run."
+        },
+        {
+          "name": "alwaysOverride",
+          "label": "Always overridable",
+          "type": "string_list",
+          "section": "Override rules",
+          "description": "Meeting subjects/categories that may always be bumped (e.g. 'Employee Holiday', 'Team Lunch'). The agent adds to this as you clear cases."
+        },
+        {
+          "name": "neverOverride",
+          "label": "Never override",
+          "type": "string_list",
+          "section": "Override rules",
+          "description": "Meeting subjects/categories that must never be bumped (e.g. 'Customer Demo', 'Interview')."
+        }
+      ],
+      "exec": {
+        "kind": "subprocess",
+        "command": "python",
+        "args": [
+          "-u",
+          "{AGENTS_DIR}/meeting-planner/main.py",
+          "--people",
+          "{people}",
+          "--urgency",
+          "{urgency}",
+          "--subject",
+          "{subject}",
+          "--duration_min",
+          "{duration_min}"
+        ],
+        "cwd": "{AGENTS_DIR}/meeting-planner",
+        "protocol": "jsonl"
+      }
     }
   ]
 }

@@ -14,6 +14,7 @@ export type CenterView =
   | { kind: "new-chat" }
   | { kind: "conversation"; conversationId: string }
   | { kind: "agent"; agentId: string }
+  | { kind: "onboarding"; agentId: string }
   | { kind: "scheduled"; taskId: string }
   | { kind: "run"; runId: string }
   | { kind: "settings" };
