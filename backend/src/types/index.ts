@@ -143,59 +143,18 @@ export type UserResponseEventPayload = {
 };
 
 // ---------- channels ----------------------------------------------------
+// Wire-facing channel types are defined once in openshuki-shared and
+// re-exported here so existing backend imports of "../types/index.js" keep
+// resolving.
 
-export type ChannelDirection = "in_out" | "out_only" | "in_only";
-
-export type ChannelSource = "config" | "user";
-
-// Categories collapse the long RunEventType list into bucket-level filtering
-// so users configure intent ("notify me on errors"), not raw event types.
-export type ChannelEventCategory =
-  | "run.lifecycle" // run_started, done
-  | "run.progress" // node_start, node_end
-  | "run.logs" // token, custom
-  | "run.tools" // tool_call, tool_result
-  | "run.artifacts" // artifact
-  | "run.interactions" // ask_user, user_response
-  | "run.errors" // error
-  | "run.llm_wait"; // waiting_for_llm, done_waiting
-
-export type ChannelFilter = {
-  eventCategories: ChannelEventCategory[];
-  includeTypes?: string[];
-  excludeTypes?: string[];
-  agentIds?: string[];
-};
-
-export type ChannelInboundPolicy = {
-  allowCommands: boolean;
-  // ["*"] to allow every registered command.
-  allowedCommandIds: string[];
-};
-
-export type ChannelSummary = {
-  id: string;
-  name: string;
-  kind: string;
-  direction: ChannelDirection;
-  enabled: boolean;
-  filter: ChannelFilter;
-  inbound: ChannelInboundPolicy;
-  adapterConfig: Record<string, unknown>;
-  source: ChannelSource;
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type ChannelMessageDirection = "in" | "out";
-export type ChannelMessageKind = "command" | "event" | "chat" | "notification";
-
-export type ChannelMessageSummary = {
-  id: string;
-  channelId: string;
-  direction: ChannelMessageDirection;
-  kind: ChannelMessageKind;
-  payload: unknown;
-  correlationId: string | null;
-  createdAt: string;
-};
+export type {
+  ChannelDirection,
+  ChannelSource,
+  ChannelEventCategory,
+  ChannelFilter,
+  ChannelInboundPolicy,
+  ChannelSummary,
+  ChannelMessageDirection,
+  ChannelMessageKind,
+  ChannelMessageSummary
+} from "openshuki-shared";
