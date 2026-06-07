@@ -5,6 +5,10 @@
 
 import type { AgentInput } from "../types/index.js";
 
+// The serialisable command summary is defined once in openshuki-shared and
+// re-exported here; the richer internal `Command` interface stays local.
+export type { CommandSummary } from "openshuki-shared";
+
 export type CommandSource = "user" | "channel" | "internal";
 
 export type CommandContext = {
@@ -26,10 +30,3 @@ export interface Command<TInput = Record<string, unknown>, TOutput = unknown> {
   inputs: AgentInput[];
   handler: (input: TInput, ctx: CommandContext) => Promise<CommandResult<TOutput>>;
 }
-
-export type CommandSummary = {
-  id: string;
-  title: string;
-  description: string;
-  inputs: AgentInput[];
-};
