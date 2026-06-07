@@ -1,5 +1,5 @@
 import { Router, type Request, type Response } from "express";
-import { eq, inArray } from "drizzle-orm";
+import { desc, eq, inArray } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { runs, scheduledTasks, agents } from "../db/schema.js";
 import { dispatchAgentRun } from "../runs/dispatch.js";
@@ -203,7 +203,8 @@ runningRouter.get("/", async (_req: Request, res: Response) => {
     })
     .from(runs)
     .leftJoin(agents, eq(runs.agentId, agents.id))
-    .where(inArray(runs.status, ["queued", "running"]));
+    .where(inArray(runs.status, ["queued", "running"]))
+    .orderBy(desc(runs.startedAt));
 
   const out: RunningTask[] = rows.map((r) => ({
     id: r.id,
