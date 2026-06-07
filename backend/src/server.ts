@@ -8,6 +8,8 @@ import { artifactsRouter } from "./routes/artifacts.js";
 import { endpointsRouter, modelsRouter } from "./routes/endpoints.js";
 import { channelsRouter } from "./routes/channels.js";
 import { startEnabled as startEnabledChannels, stopAll as stopAllChannels } from "./channels/runtime.js";
+// Side-effect import: registers all built-in channel-kind adapters.
+import "./channels/adapters/index.js";
 import { commandsRouter } from "./routes/commands.js";
 import { registerBuiltinCommands } from "./commands/builtin.js";
 import { migrate } from "./db/migrate.js";
