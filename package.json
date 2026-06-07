@@ -9,8 +9,10 @@
     "dev": "concurrently -n backend,frontend -c cyan,magenta \"cd backend && pnpm dev\" \"cd frontend && pnpm dev\"",
     "dev:backend": "concurrently -n backend -c cyan \"cd backend && pnpm dev\"",
     "dev:frontend": "concurrently -n frontend -c magenta \"cd frontend && pnpm dev\"",
+    "dev:desktop": "concurrently -n frontend,desktop -c magenta,green \"cd frontend && pnpm dev\" \"cd desktop && pnpm dev\"",
     "build:backend": "concurrently -n backend -c cyan \"cd backend && pnpm build\"",
     "build:frontend": "concurrently -n frontend -c magenta \"cd frontend && pnpm build\"",
+    "build:desktop": "pnpm --filter openshuki-backend build && pnpm --filter openshuki-frontend build && pnpm --filter openshuki-desktop package",
     "agents:install": "concurrently -n agents -c yellow \"cd agents && pnpm install && pip install -r requirements.txt\"",
     "clean": "node scripts/clean.mjs"
   },

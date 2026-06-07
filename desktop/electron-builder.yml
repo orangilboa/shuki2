@@ -1,0 +1,27 @@
+appId: com.openshuki.tray
+productName: openshuki
+directories:
+  output: release
+  buildResources: build
+files:
+  - dist/**
+  - package.json
+extraResources:
+  # Ship the built backend + frontend alongside the Electron app. The
+  # main process expects them in `process.cwd()/../backend` and
+  # `process.cwd()/../frontend/dist` (the pnpm-workspace layout). For a
+  # packaged build you'll need to extend this section to bundle the
+  # actual build outputs — left as the next step.
+  - from: ../backend/dist
+    to: app-backend/dist
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: build/icon.ico
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  shortcutName: openshuki
