@@ -77,7 +77,7 @@ type State = {
     agentId: string,
     inputs?: Record<string, unknown>,
     model?: string | null
-  ) => Promise<void>;
+  ) => Promise<RunningTask>;
   cancelRun: (runId: string) => Promise<void>;
 
   // Per-run UI flag set while a cancel request is in flight. The canonical
@@ -196,6 +196,7 @@ export const useStore = create<State>((set, get) => ({
   runAgent: async (agentId, inputs, model) => {
     const task = await api.runAgent(agentId, inputs ?? {}, model);
     set(s => ({ running: [task, ...s.running] }));
+    return task;
   },
 
   cancelRun: async runId => {

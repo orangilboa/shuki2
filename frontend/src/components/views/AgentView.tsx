@@ -71,8 +71,9 @@ export default function AgentView({ agentId }: { agentId: string }) {
         const cast = castForSubmit(inp, raw);
         if (cast !== undefined) payload[inp.name] = cast;
       }
-      await runAgent(agent.id, payload, model);
+      const task = await runAgent(agent.id, payload, model);
       await loadRunning();
+      setCenterView({ kind: "run", runId: task.id });
     } finally {
       setBusy(false);
     }
