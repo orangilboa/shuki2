@@ -7,3 +7,8 @@ packages:
   - 'e2e'
 allowBuilds:
   esbuild: true
+  # electron's postinstall fetches its prebuilt binary from GitHub (not npm).
+  # For offline installs, run `node scripts/seed-electron-cache.mjs` first to
+  # seed the vendored binary into the OS cache; the postinstall then finds it
+  # locally instead of downloading. See desktop/vendor/README.md.
+  electron: true

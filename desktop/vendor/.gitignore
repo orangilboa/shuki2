@@ -1,0 +1,4 @@
+# The Electron runtime zip is committed as split `*.part-*` chunks (it exceeds
+# GitHub's 100 MB per-file limit). Never commit a reassembled full zip — the
+# seed script rebuilds it into the OS cache, outside the repo.
+electron-cache/**/electron-v*-win32-x64.zip
