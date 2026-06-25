@@ -24,8 +24,8 @@ cp backend/.env.example backend/.env   # fill in any LLM API keys you want; DB_U
 # 2. Run both servers (or use `pnpm dev:backend` / `pnpm dev:frontend` individually)
 pnpm dev
 
-# 3. Python deps for the demo agents (one-time)
-pnpm --filter agents exec pip install -r requirements.txt
+# 3. Python deps for the demo agents — one isolated venv per agent (one-time)
+pnpm agents:install
 ```
 
 The backend runs an idempotent DDL script on every boot — no manual migration step.

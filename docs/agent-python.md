@@ -8,11 +8,14 @@ A walkthrough for adding a new Python agent to openshuki, complete with LangGrap
 agents/
   <your-agent>/
     main.py            # entrypoint — argparse + LangGraph
-    requirements.txt   # agent-specific deps; or rely on agents/requirements.txt
+    requirements.txt   # agent-specific deps (optional); shared deps live in agents/requirements.txt
+    .venv/             # this agent's own virtualenv (created by `pnpm agents:install`; gitignored)
     (other modules)
 ```
 
 Agents share `agents/agent_util.py` (UTF-8 stdout + JSONL helpers) — your `main.py` imports from there. Shared deps (langgraph, langchain-core) live in `agents/requirements.txt`.
+
+**Each Python agent runs in its own venv** at `agents/<your-agent>/.venv`. `pnpm agents:install` (from the repo root) creates it and installs the shared `agents/requirements.txt` plus your agent's own `requirements.txt` (if present) into it. Put deps that only your agent needs in `agents/<your-agent>/requirements.txt`; keep `agents/requirements.txt` for things every agent uses.
 
 ## Skeleton
 
@@ -128,7 +131,7 @@ Append to `backend/config/agents.json`:
   ],
   "exec": {
     "kind": "subprocess",
-    "command": "python",
+    "command": "{VENV_PYTHON}",
     "args": ["-u", "{AGENTS_DIR}/<your-agent>/main.py",
              "--query", "{query}"],
     "cwd": "{AGENTS_DIR}/<your-agent>",
@@ -145,8 +148,8 @@ Field guide:
 | `inputs[].type` | `string`, `number`, or `boolean`. The UI generates the right control. |
 | `inputs[].required` | If true, the Run button stays disabled until the field is non-empty (or `true` for booleans). |
 | `inputs[].default` | Optional. Pre-filled value; also used as the substitution if the user clears the field. |
-| `exec.command` | Use `python` (or `python3` on macOS/Linux setups where it matters). The `-u` flag in args 0 disables stdout buffering — leave it. |
-| `exec.cwd` | Set to the agent's directory so relative paths in your code work. |
+| `exec.command` | Use `{VENV_PYTHON}` — the runner expands it to this agent's own venv interpreter (`<cwd>/.venv/bin/python`, or `…\Scripts\python.exe` on Windows). The `-u` flag in args 0 disables stdout buffering — leave it. |
+| `exec.cwd` | Set to the agent's directory so relative paths in your code work **and** so `{VENV_PYTHON}` resolves to that agent's `.venv`. |
 | `exec.protocol` | Always `jsonl` for agents that use `agent_util`. |
 
 Restart the backend (`tsx watch` reloads on save, but config files are read at boot).
@@ -154,6 +157,7 @@ Restart the backend (`tsx watch` reloads on save, but config files are read at b
 ## Templating cheatsheet
 
 - `{AGENTS_DIR}` → absolute path to `agents/`.
+- `{VENV_PYTHON}` (in `command`/`args`) → this agent's venv interpreter, resolved from `exec.cwd`.
 - `{<inputName>}` → string-cast value from the form (with input-spec `default` fallback).
 - `${VAR_NAME}` (in `exec.env` only) → `process.env[VAR_NAME] ?? ""`.
 
@@ -162,7 +166,7 @@ To pass an API key from the backend's `.env` to your Python agent:
 ```jsonc
 "exec": {
   "kind": "subprocess",
-  "command": "python",
+  "command": "{VENV_PYTHON}",
   "args": ["-u", "{AGENTS_DIR}/<agent>/main.py", "--query", "{query}"],
   "cwd": "{AGENTS_DIR}/<agent>",
   "env": {
@@ -251,7 +255,7 @@ The runner copies the file into `backend/data/artifacts/<runId>/<sanitised-name>
      | while read -r line; do echo "$line" | python -m json.tool -; done
    ```
 
-2. Add the entry in `backend/config/agents.json`. Restart the backend.
+2. Add the entry in `backend/config/agents.json`, then run `pnpm agents:install` to create the agent's venv and install its deps. Restart the backend.
 
 3. Pick the agent in the left panel of the UI. Run it. Watch the Logs tab for events and the Artifacts tab for any artifacts you emitted.
 

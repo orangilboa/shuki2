@@ -13,7 +13,7 @@ Two parts: a **human (manual) plan** (§1–§3) and an **e2e plan** (§4) descr
 
 - Postgres reachable at `DB_URL` (default `postgresql://openshuki:openshuki@localhost:5432/openshuki`).
 - `pnpm install` at the repo root.
-- Python + `langgraph` importable on PATH (the meeting-planner is a Python subprocess agent). Verify: `python -c "import langgraph"`.
+- The meeting-planner agent's venv set up via `pnpm agents:install` (the meeting-planner is a Python subprocess agent that runs from `agents/meeting-planner/.venv`). Verify: `agents/meeting-planner/.venv/bin/python -c "import langgraph"`.
 - `pnpm dev` (backend :4000, frontend :5173) for the UI tests.
 
 The `meeting-planner` agent and its onboarding spec ship in `backend/config/agents.json`. Its calendar data is a deterministic mock (`agents/meeting-planner/outlook_com.py`) seeded per attendee name, shaped like the real desktop Outlook COM object model.
@@ -84,7 +84,7 @@ Location: `backend/test/e2e/`. Runner: Node's built-in `node:test` via `tsx` (no
 ### Running
 
 ```bash
-# Prereqs: Postgres up; python + langgraph on PATH.
+# Prereqs: Postgres up; `pnpm agents:install` (meeting-planner venv with langgraph).
 pnpm --filter openshuki-backend test:e2e            # both suites
 pnpm --filter openshuki-backend test:e2e:onboarding # API-only (fast)
 pnpm --filter openshuki-backend test:e2e:planner    # full-stack agent run

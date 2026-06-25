@@ -57,9 +57,11 @@ pnpm dev
 pnpm dev:backend
 pnpm dev:frontend
 
-# agents — Python deps only (TS deps come from the workspace install above)
-pnpm --filter agents exec pip install -r requirements.txt
+# agents — one Python venv per agent + TS deps (TS deps also come from the root install above)
+pnpm agents:install
 ```
+
+`agents:install` creates a dedicated `.venv` inside each Python agent's directory (if missing) and installs that agent's dependencies into it — the shared `agents/requirements.txt` plus the agent's own `requirements.txt` if it has one. Each agent is therefore dependency-isolated. `pnpm install:all` runs the same venv setup before the workspace install.
 
 Backend needs Postgres reachable at `DB_URL` (defaults to `postgresql://openshuki:openshuki@localhost:5432/openshuki`). See [docs/postgres.md](docs/postgres.md) for one-time DB + role provisioning. The backend runs an idempotent DDL script on every boot — adding a new table is a `CREATE TABLE IF NOT EXISTS` in `backend/src/db/migrate.ts` plus the matching Drizzle definition in `schema.ts`.
 

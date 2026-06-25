@@ -115,7 +115,7 @@ There is an e2e suite under `backend/test/e2e/` using Node's built-in `node:test
 - `pnpm test:e2e:onboarding` / `:planner` — individually.
 - `pnpm typecheck:test` — type-checks `src` + `test` via `tsconfig.test.json`.
 
-Prereqs: Postgres at `DB_URL` (as for the app) and, for the planner suite, `python` + `langgraph` on PATH (else it skips). Suites reset the agent's config in teardown. See [../docs/test-plan-meeting-planner.md](../docs/test-plan-meeting-planner.md).
+Prereqs: Postgres at `DB_URL` (as for the app) and, for the planner suite, the meeting-planner agent's venv set up via `pnpm agents:install` (the suite probes `agents/meeting-planner/.venv` for langgraph; else it skips). Suites reset the agent's config in teardown. See [../docs/test-plan-meeting-planner.md](../docs/test-plan-meeting-planner.md).
 
 ### Migration policy
 

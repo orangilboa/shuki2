@@ -27,7 +27,9 @@ import {
 
 const AGENT = "meeting-planner";
 const HAVE_PY = pythonAgentAvailable();
-const skip = HAVE_PY ? false : "python + langgraph not available on PATH";
+const skip = HAVE_PY
+  ? false
+  : "meeting-planner venv not set up (run `pnpm agents:install`)";
 
 let ts: TestServer;
 

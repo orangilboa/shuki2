@@ -23,7 +23,7 @@
       ],
       "exec": {
         "kind": "subprocess",
-        "command": "python",
+        "command": "{VENV_PYTHON}",
         "args": [
           "-u",
           "{AGENTS_DIR}/weather/main.py",
@@ -88,7 +88,7 @@
       ],
       "exec": {
         "kind": "subprocess",
-        "command": "python",
+        "command": "{VENV_PYTHON}",
         "args": [
           "-u",
           "{AGENTS_DIR}/quick-note/main.py",
@@ -115,7 +115,7 @@
       ],
       "exec": {
         "kind": "subprocess",
-        "command": "python",
+        "command": "{VENV_PYTHON}",
         "args": [
           "-u",
           "{AGENTS_DIR}/ask-demo/main.py",
@@ -203,7 +203,7 @@
       ],
       "exec": {
         "kind": "subprocess",
-        "command": "python",
+        "command": "{VENV_PYTHON}",
         "args": [
           "-u",
           "{AGENTS_DIR}/meeting-planner/main.py",

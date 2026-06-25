@@ -8,7 +8,8 @@
 //
 // Requires: Postgres reachable at DB_URL (default
 // postgresql://openshuki:openshuki@localhost:5432/openshuki) and, for the
-// meeting-planner tests, Python + langgraph on PATH.
+// meeting-planner tests, the meeting-planner agent's venv set up via
+// `pnpm agents:install` (langgraph installed into agents/meeting-planner/.venv).
 
 import type { Server } from "node:http";
 import { start } from "../../src/server.js";
@@ -147,15 +148,26 @@ export async function getArtifactContent(
 // ---------- prereq detection ----------------------------------------------
 
 import { spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import path from "node:path";
 
-/** True if a Python interpreter with langgraph importable is on PATH. */
+/**
+ * True if the meeting-planner agent's own venv exists and has langgraph
+ * importable. Agents run from a per-agent venv (see scripts/setup-agent-venvs.mjs),
+ * so we probe that interpreter rather than whatever Python is on PATH. The
+ * agents dir resolves the same way the subprocess runner does: `../agents`
+ * relative to the backend cwd.
+ */
 export function pythonAgentAvailable(): boolean {
-  for (const cmd of ["python", "python3"]) {
-    const r = spawnSync(cmd, ["-c", "import langgraph"], {
-      stdio: "ignore",
-      timeout: 15_000
-    });
-    if (r.status === 0) return true;
-  }
-  return false;
+  const venvDir = path.resolve(process.cwd(), "..", "agents", "meeting-planner", ".venv");
+  const venvPython =
+    process.platform === "win32"
+      ? path.join(venvDir, "Scripts", "python.exe")
+      : path.join(venvDir, "bin", "python");
+  if (!existsSync(venvPython)) return false;
+  const r = spawnSync(venvPython, ["-c", "import langgraph"], {
+    stdio: "ignore",
+    timeout: 15_000
+  });
+  return r.status === 0;
 }

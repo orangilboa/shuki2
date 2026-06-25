@@ -2,9 +2,14 @@
 // translates JSONL events into bus.publish calls, and updates the runs row.
 //
 // Templating rules:
-//   - In `args` strings, `cwd`, and `env` values:
+//   - In `command`, `args` strings, `cwd`, and `env` values:
 //       {AGENTS_DIR}     -> repo-root/agents
 //       {<inputName>}    -> string-cast value from `inputs` (default fallback)
+//   - In `command` and `args` (resolved after `cwd`):
+//       {VENV_PYTHON}    -> <expandedCwd>/.venv/(bin|Scripts)/python — the
+//                           per-agent virtualenv interpreter created by
+//                           scripts/setup-agent-venvs.mjs. Each Python agent has
+//                           its own venv living in its working directory.
 //   - In `env` values only:
 //       ${VAR_NAME}      -> process.env[VAR_NAME] ?? "" (no error on missing)
 //
@@ -73,16 +78,28 @@ function resolveAgentsDir(): string {
   return fromCwdParent;
 }
 
+/**
+ * Path to a directory's per-agent virtualenv interpreter, platform-aware.
+ * Mirrors the resolution in scripts/setup-agent-venvs.mjs.
+ */
+function venvPythonPath(dir: string): string {
+  return process.platform === "win32"
+    ? path.join(dir, ".venv", "Scripts", "python.exe")
+    : path.join(dir, ".venv", "bin", "python");
+}
+
 function expandTemplate(
   template: string,
   inputs: Record<string, unknown>,
   spec: AgentInput[],
-  agentsDir: string
+  agentsDir: string,
+  venvPython?: string
 ): string {
-  // Process {VAR} placeholders. {AGENTS_DIR} is special; everything else is
-  // an input name.
+  // Process {VAR} placeholders. {AGENTS_DIR} and {VENV_PYTHON} are special;
+  // everything else is an input name.
   return template.replace(/\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (_match, key: string) => {
     if (key === "AGENTS_DIR") return agentsDir;
+    if (key === "VENV_PYTHON") return venvPython ?? "";
     if (Object.prototype.hasOwnProperty.call(inputs, key)) {
       const v = inputs[key];
       if (v === null || v === undefined) {
@@ -138,13 +155,24 @@ export async function runSubprocess(args: RunSubprocessArgs): Promise<void> {
   const agentsDir = resolveAgentsDir();
 
   // ---------- expand templates ----------
-  const expandedArgs = exec.args.map((a) =>
-    expandTemplate(a, inputs, inputSpec, agentsDir)
-  );
+  // Resolve cwd first: {VENV_PYTHON} is anchored to it (the agent's venv lives
+  // in its working directory), so command/args expansion happens afterwards.
   const expandedCwd =
     exec.cwd !== undefined
       ? expandTemplate(exec.cwd, inputs, inputSpec, agentsDir)
       : undefined;
+  const venvPython = venvPythonPath(expandedCwd ?? agentsDir);
+
+  const expandedCommand = expandTemplate(
+    exec.command,
+    inputs,
+    inputSpec,
+    agentsDir,
+    venvPython
+  );
+  const expandedArgs = exec.args.map((a) =>
+    expandTemplate(a, inputs, inputSpec, agentsDir, venvPython)
+  );
 
   const expandedEnv: Record<string, string> = {};
   if (exec.env) {
@@ -211,9 +239,12 @@ export async function runSubprocess(args: RunSubprocessArgs): Promise<void> {
     return `"${a.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, "$1$1")}"`;
   };
   const finalArgs = useShell ? expandedArgs.map(quoteForWinShell) : expandedArgs;
+  // The command may now be an absolute venv-python path (with spaces on
+  // Windows), so quote it too when going through cmd.exe.
+  const finalCommand = useShell ? quoteForWinShell(expandedCommand) : expandedCommand;
   let child: ChildProcessByStdio<Writable, Readable, Readable>;
   try {
-    child = spawn(exec.command, finalArgs, {
+    child = spawn(finalCommand, finalArgs, {
       cwd: expandedCwd,
       env: { ...process.env, ...expandedEnv },
       // stdin is `pipe` so the backend can deliver answers to ask_user prompts
