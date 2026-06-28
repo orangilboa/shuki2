@@ -9,19 +9,27 @@ This is the doc to read when adding or modifying an agent. For the wire-level pr
 ```
 agent_util.py        Python helpers — emit/node_start/node_end/token/.../artifact/done.
 agent_util.ts        TS helpers — same surface, camelCased.
-package.json         Shared TS deps (@langchain/langgraph, tsx, typescript).
-tsconfig.json        Shared tsconfig — `tsc --noEmit` checks every agent together.
+package.json         Parent: shared TS tooling only (typescript, @types/node) + the install:venvs script.
+tsconfig.json        Shared base tsconfig — agents extend it; also type-checks agent_util.ts.
 requirements.txt     Shared Python deps (langgraph, langchain-core) — installed into every Python agent's venv.
 weather/             Demo: 2-node Python LangGraph (fetch → format).
   .venv/             Per-agent virtualenv (created by `pnpm agents:install`; gitignored).
 traffic/             Demo: 2-node TS LangGraph (lookup → summarize).
+  package.json       Per-agent TS deps (@langchain/langgraph, tsx, …) — isolated workspace package.
+  tsconfig.json      Extends ../tsconfig.json; includes this agent + ../agent_util.ts.
 ```
 
 ## Python agents get their own venv
 
 Each Python agent runs in its **own** virtualenv at `agents/<name>/.venv`, so one agent's dependencies can never collide with another's. `pnpm agents:install` (run from the repo root) walks every agent directory containing a `main.py`, creates the venv if it's missing, and installs the shared `agents/requirements.txt` plus the agent's own `agents/<name>/requirements.txt` (if present) into it.
 
-The config wires this up via the `{VENV_PYTHON}` template token: a Python agent sets `"command": "{VENV_PYTHON}"`, which the subprocess runner expands to `<cwd>/.venv/bin/python` (or `…\Scripts\python.exe` on Windows) — `<cwd>` being the agent's working directory. So **a Python agent's `exec.cwd` must point at its own directory** (e.g. `"{AGENTS_DIR}/weather"`), which is also where its `.venv` lives. TypeScript agents need no venv and keep `"command": "npx"`.
+The config wires this up via the `{VENV_PYTHON}` template token: a Python agent sets `"command": "{VENV_PYTHON}"`, which the subprocess runner expands to `<cwd>/.venv/bin/python` (or `…\Scripts\python.exe` on Windows) — `<cwd>` being the agent's working directory. So **a Python agent's `exec.cwd` must point at its own directory** (e.g. `"{AGENTS_DIR}/weather"`), which is also where its `.venv` lives.
+
+## TypeScript agents get their own package
+
+The same isolation applies on the TS side: **each TypeScript agent is its own workspace package** with its own `agents/<name>/package.json` (deps like `@langchain/langgraph`, `tsx`) and `agents/<name>/tsconfig.json` (extends `../tsconfig.json`, includes the shared `../agent_util.ts`). The `agents/*` glob in `pnpm-workspace.yaml` registers any subdirectory that has a `package.json`, so `pnpm install` materializes each agent's own `node_modules`. The parent `agents/package.json` keeps only shared tooling (typescript, @types/node) and the `install:venvs` script.
+
+A TS agent keeps `"command": "npx"` with `"args": ["tsx", …]`, but its **`exec.cwd` must point at its own directory** (e.g. `"{AGENTS_DIR}/traffic"`) so `npx` resolves `tsx` from that agent's `node_modules`. Copy `agents/traffic/` as the template for a new TS agent.
 
 Pick a language per agent — Python or TypeScript both work. Use whichever fits the libraries you need.
 
@@ -188,7 +196,7 @@ Notes:
 4. Run `pnpm agents:install` from the repo root to create the agent's `.venv` and install its deps.
 5. Restart the backend (`tsx watch` will pick up the schema/migrate; agents.json is read once on boot).
 6. Open the frontend; the new agent shows up in the left panel under "Agents" with an auto-generated form.
-7. (Optional) Add deps: shared Python deps go in `agents/requirements.txt`; agent-specific Python deps go in `agents/<name>/requirements.txt`; TS deps go in `agents/package.json`. Re-run `pnpm agents:install` (Python) or `pnpm install` at the workspace root (TS).
+7. (Optional) Add deps: shared Python deps go in `agents/requirements.txt`; agent-specific Python deps go in `agents/<name>/requirements.txt`; TS deps go in the agent's own `agents/<name>/package.json`. Re-run `pnpm agents:install` (Python) or `pnpm install` at the workspace root (TS).
 
 ## Constraints / tips
 

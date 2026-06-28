@@ -3,6 +3,7 @@ packages:
   - 'backend'
   - 'frontend'
   - 'agents'
+  - 'agents/*'
   - 'desktop'
   - 'e2e'
 allowBuilds:

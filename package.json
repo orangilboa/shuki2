@@ -3,7 +3,11 @@
   "version": "1.0.0",
   "description": "Personal-assistant scaffold with Express backend, React frontend, and subprocess agents",
   "private": true,
-  "packageManager": "pnpm@10.33.4",
+  "packageManager": "pnpm@11.9.0",
+  "engines": {
+    "node": ">=24",
+    "pnpm": ">=11"
+  },
   "scripts": {
     "install:all": "node scripts/setup-agent-venvs.mjs && pnpm install -r",
     "dev": "concurrently -n backend,frontend -c cyan,magenta \"cd backend && pnpm dev\" \"cd frontend && pnpm dev\"",
@@ -13,7 +17,7 @@
     "build:backend": "concurrently -n backend -c cyan \"cd backend && pnpm build\"",
     "build:frontend": "concurrently -n frontend -c magenta \"cd frontend && pnpm build\"",
     "build:desktop": "pnpm --filter openshuki-backend build && pnpm --filter openshuki-frontend build && pnpm --filter openshuki-desktop package",
-    "agents:install": "node scripts/setup-agent-venvs.mjs && pnpm --filter openshuki-tools install",
+    "agents:install": "pnpm install && pnpm --filter openshuki-tools run install:venvs",
     "test:e2e": "pnpm --filter openshuki-e2e test",
     "test:e2e:install": "pnpm --filter openshuki-e2e install:browsers",
     "clean": "node scripts/clean.mjs"

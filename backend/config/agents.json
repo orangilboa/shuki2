@@ -68,7 +68,7 @@
           "--destination",
           "{destination}"
         ],
-        "cwd": "{AGENTS_DIR}",
+        "cwd": "{AGENTS_DIR}/traffic",
         "protocol": "jsonl"
       }
     },

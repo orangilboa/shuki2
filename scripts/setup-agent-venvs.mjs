@@ -17,9 +17,13 @@
 
 import { existsSync, readdirSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { resolve, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { dirname, resolve, join } from "node:path";
 
-const AGENTS_DIR = resolve("agents");
+// Resolve `agents/` relative to this script (scripts/ → ../agents), not the
+// cwd, so the script works whether invoked from the repo root or from agents/.
+const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
+const AGENTS_DIR = resolve(SCRIPT_DIR, "..", "agents");
 const SHARED_REQUIREMENTS = join(AGENTS_DIR, "requirements.txt");
 
 /** Locate a base Python interpreter usable for `-m venv`. */

@@ -6,15 +6,36 @@ A walkthrough for adding a new TypeScript agent to openshuki, complete with `@la
 
 ```
 agents/
-  package.json         # shared TS deps (@langchain/langgraph, tsx, typescript)
-  tsconfig.json        # shared tsconfig — `tsc --noEmit` checks every agent
+  package.json         # parent: shared tooling only (typescript, @types/node) + install:venvs
+  tsconfig.json        # shared base tsconfig (agents extend it); also checks agent_util.ts
   agent_util.ts        # JSONL emit helpers (you'll import from here)
   <your-agent>/
+    package.json       # THIS agent's own deps (@langchain/langgraph, tsx, …) — isolated
+    tsconfig.json      # extends ../tsconfig.json; includes this agent + ../agent_util.ts
     main.ts            # entrypoint — argv parsing + LangGraph
     (other modules)
 ```
 
-All TS agents share `agents/package.json`. Don't add per-agent `package.json` unless your agent needs deps the others don't — and then prefer adding to the shared one.
+**Each TS agent is its own workspace package with its own `package.json` and dependencies** — mirroring the per-agent venv isolation on the Python side. One agent's dep versions can't collide with another's. `pnpm install` (or `pnpm agents:install`) at the repo root materializes each agent's `node_modules`. Use `agents/traffic/` as the template:
+
+```jsonc
+// agents/<your-agent>/package.json
+{
+  "name": "openshuki-agent-<your-agent>",
+  "private": true,
+  "type": "module",
+  "scripts": { "start": "tsx main.ts", "typecheck": "tsc --noEmit" },
+  "dependencies": { "@langchain/core": "^1.1.44", "@langchain/langgraph": "^1.3.0" },
+  "devDependencies": { "@types/node": "^25.6.0", "tsx": "^4.21.0", "typescript": "^5.9.3" }
+}
+```
+
+```jsonc
+// agents/<your-agent>/tsconfig.json
+{ "extends": "../tsconfig.json", "include": ["**/*.ts", "../agent_util.ts"] }
+```
+
+The `agents/*` glob in `pnpm-workspace.yaml` picks up any directory with a `package.json`, so a new agent is registered automatically on the next `pnpm install`.
 
 ## Skeleton
 
@@ -142,7 +163,7 @@ Append to `backend/config/agents.json`:
     "args": ["tsx",
              "{AGENTS_DIR}/<your-agent>/main.ts",
              "--query", "{query}"],
-    "cwd": "{AGENTS_DIR}",
+    "cwd": "{AGENTS_DIR}/<your-agent>",
     "protocol": "jsonl"
   }
 }
@@ -152,16 +173,16 @@ Field-by-field is identical to the Python agent config (see [agent-python.md](ag
 
 - **`command: "npx"`** — uses npm's binary resolver. The runner already handles Windows `.cmd` shim resolution, so this works on every platform.
 - **`args[0]: "tsx"`** — runs the TS file directly via `tsx`. No precompile step.
-- **`cwd: "{AGENTS_DIR}"`** — sets the cwd to the shared `agents/` so `npx` resolves `tsx` from `agents/node_modules/.bin/tsx`. If you use a different cwd you'll need to install `tsx` there too.
+- **`cwd: "{AGENTS_DIR}/<your-agent>"`** — sets the cwd to the agent's own directory so `npx` resolves `tsx` from that agent's `node_modules/.bin/tsx`. Each TS agent declares `tsx` in its own `package.json`, so it's self-contained.
 
 If you want to skip `npx` (saves ~1s of startup time), use the resolved bin directly:
 
 ```jsonc
 "command": "node",
-"args": ["{AGENTS_DIR}/node_modules/tsx/dist/cli.mjs",
+"args": ["{AGENTS_DIR}/<your-agent>/node_modules/tsx/dist/cli.mjs",
          "{AGENTS_DIR}/<your-agent>/main.ts",
          "--query", "{query}"],
-"cwd": "{AGENTS_DIR}"
+"cwd": "{AGENTS_DIR}/<your-agent>"
 ```
 
 This bypasses `npx` resolution and the Windows `.cmd` shell shim. Faster, but tied to tsx's internal layout.
@@ -176,10 +197,10 @@ Same as Python:
 
 ## Calling an LLM
 
-If your agent needs to call an LLM, use `@langchain/openai` (already implicit via `@langchain/langgraph`'s peer deps; install if not present):
+If your agent needs to call an LLM, use `@langchain/openai` (already implicit via `@langchain/langgraph`'s peer deps; install if not present). Add it to **your agent's own** package:
 
 ```bash
-pnpm --filter agents add @langchain/openai
+pnpm --filter openshuki-agent-<your-agent> add @langchain/openai
 ```
 
 Pass the model from the picker as a CLI arg (`--model "{model}"`) and the API key via `exec.env`:
@@ -248,19 +269,19 @@ The runner copies the file into `backend/data/artifacts/<runId>/<sanitised-name>
 
 ## Dev loop
 
-1. Type-check from the shared tsconfig:
+1. Type-check from your agent's own tsconfig:
 
    ```bash
-   cd agents && npx tsc --noEmit
+   cd agents/<your-agent> && npx tsc --noEmit
    ```
 
-   Strict TS catches typos and bad imports.
+   Strict TS catches typos and bad imports. (It includes the shared `../agent_util.ts` too.)
 
 2. Run standalone first to validate the JSONL output:
 
    ```bash
-   cd agents
-   npx tsx <your-agent>/main.ts --query "hello"
+   cd agents/<your-agent>
+   npx tsx main.ts --query "hello"
    ```
 
 3. Add the entry in `backend/config/agents.json`. Restart the backend.
@@ -280,7 +301,7 @@ The runner copies the file into `backend/data/artifacts/<runId>/<sanitised-name>
 ## Common pitfalls
 
 - **`.js` vs `.ts` import extensions**: NodeNext + ESM forces relative imports to use the runtime extension (`.js`), not the source extension (`.ts`). The TypeScript compiler resolves the `.js` to a sibling `.ts`. `tsx` handles this at runtime. Without the `.js`, you'll get an import error at run.
-- **`@langchain/langgraph` API churn**: this library is pre-1.0 and does break shapes between minor versions. Pin in `agents/package.json` (`^0.2.0` today) and read the changelog before upgrading. The TS API differs from the Python one in subtle ways — `Annotation.Root({})` vs `TypedDict`, method-chained graph builder vs imperative `add_node`, etc.
+- **`@langchain/langgraph` API churn**: this library does break shapes between versions. Pin it in **your agent's own** `agents/<your-agent>/package.json` and read the changelog before upgrading. The TS API differs from the Python one in subtle ways — `Annotation.Root({})` vs `TypedDict`, method-chained graph builder vs imperative `add_node`, etc.
 - **`npx` startup latency**: ~1s per invocation. Acceptable for one-shot agents; switch to the direct `node tsx/dist/cli.mjs` invocation if it bothers you.
 - **Type-only imports**: if you `import type {…}` from a runtime module, the import gets stripped at compile, no runtime cost. Use this freely for shared interfaces.
 - **`process.exit(0)` after `done()`**: `done()` writes the final event but doesn't exit. Without an explicit `process.exit`, the Node event loop may keep the process alive (open timers, libuv handles). Always `process.exit` once you're done streaming.

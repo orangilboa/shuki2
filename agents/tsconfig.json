@@ -13,5 +13,5 @@
     "noUnusedParameters": false,
     "noEmit": true
   },
-  "include": ["**/*.ts"]
+  "include": ["agent_util.ts"]
 }
