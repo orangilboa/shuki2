@@ -1,0 +1,21 @@
+# Dependencies for the weather agent. Installed into this agent's own venv by
+# `pnpm agents:install` (scripts/setup-agent-venvs.mjs).
+#
+# `py-modules = []` makes this a metadata-only package: pip installs the
+# declared dependencies but does NOT try to package the flat main.py script
+# (which imports the shared ../agent_util.py at runtime via sys.path).
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "openshuki-agent-weather"
+version = "0.1.0"
+description = "Weather forecast agent (2-node LangGraph)."
+requires-python = ">=3.9"
+dependencies = [
+    "langgraph>=0.2.0",
+]
+
+[tool.setuptools]
+py-modules = []

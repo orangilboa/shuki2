@@ -11,8 +11,8 @@ agent_util.py        Python helpers — emit/node_start/node_end/token/.../artif
 agent_util.ts        TS helpers — same surface, camelCased.
 package.json         Parent: shared TS tooling only (typescript, @types/node) + the install:venvs script.
 tsconfig.json        Shared base tsconfig — agents extend it; also type-checks agent_util.ts.
-requirements.txt     Shared Python deps (langgraph, langchain-core) — installed into every Python agent's venv.
 weather/             Demo: 2-node Python LangGraph (fetch → format).
+  pyproject.toml     This agent's own Python deps (e.g. langgraph) — installed into its venv.
   .venv/             Per-agent virtualenv (created by `pnpm agents:install`; gitignored).
 traffic/             Demo: 2-node TS LangGraph (lookup → summarize).
   package.json       Per-agent TS deps (@langchain/langgraph, tsx, …) — isolated workspace package.
@@ -21,7 +21,9 @@ traffic/             Demo: 2-node TS LangGraph (lookup → summarize).
 
 ## Python agents get their own venv
 
-Each Python agent runs in its **own** virtualenv at `agents/<name>/.venv`, so one agent's dependencies can never collide with another's. `pnpm agents:install` (run from the repo root) walks every agent directory containing a `main.py`, creates the venv if it's missing, and installs the shared `agents/requirements.txt` plus the agent's own `agents/<name>/requirements.txt` (if present) into it.
+Each Python agent runs in its **own** virtualenv at `agents/<name>/.venv`, so one agent's dependencies can never collide with another's. `pnpm agents:install` (run from the repo root) walks every agent directory containing a `main.py`, creates the venv if it's missing (via `uv venv`), and installs that agent's own declared dependencies into it from `agents/<name>/pyproject.toml` (`uv pip install <dir>`; a `requirements.txt` is also honoured as a fallback). Each agent declares exactly what it imports — e.g. `weather` and `meeting-planner` need `langgraph`, while `quick-note` and `ask-demo` are stdlib-only and declare no third-party deps. The install is idempotent: existing venvs are reused, deps re-installed as no-ops when already satisfied.
+
+Dependencies are provisioned with **uv** (Astral's package manager — the Python analogue of pnpm). uv links each package from a single global content-addressed cache (clone/hardlink) rather than copying a fresh copy into every venv, so identical versions across agents (e.g. `langgraph` in both `weather` and `meeting-planner`) are downloaded/built once and stored once on disk — full isolation, no duplication. `agents:install` runs `node scripts/ensure-uv.mjs` first, which installs uv automatically if it's missing (and the venv script falls back to that when run standalone).
 
 The config wires this up via the `{VENV_PYTHON}` template token: a Python agent sets `"command": "{VENV_PYTHON}"`, which the subprocess runner expands to `<cwd>/.venv/bin/python` (or `…\Scripts\python.exe` on Windows) — `<cwd>` being the agent's working directory. So **a Python agent's `exec.cwd` must point at its own directory** (e.g. `"{AGENTS_DIR}/weather"`), which is also where its `.venv` lives.
 
@@ -196,7 +198,7 @@ Notes:
 4. Run `pnpm agents:install` from the repo root to create the agent's `.venv` and install its deps.
 5. Restart the backend (`tsx watch` will pick up the schema/migrate; agents.json is read once on boot).
 6. Open the frontend; the new agent shows up in the left panel under "Agents" with an auto-generated form.
-7. (Optional) Add deps: shared Python deps go in `agents/requirements.txt`; agent-specific Python deps go in `agents/<name>/requirements.txt`; TS deps go in the agent's own `agents/<name>/package.json`. Re-run `pnpm agents:install` (Python) or `pnpm install` at the workspace root (TS).
+7. (Optional) Add deps: Python deps go in the agent's own `agents/<name>/pyproject.toml` (`[project].dependencies`); TS deps go in the agent's own `agents/<name>/package.json`. Re-run `pnpm agents:install` (Python) or `pnpm install` at the workspace root (TS).
 
 ## Constraints / tips
 

@@ -1,0 +1,22 @@
+# Dependencies for the meeting-planner agent. Installed into this agent's own
+# venv by `pnpm agents:install` (scripts/setup-agent-venvs.mjs).
+#
+# `py-modules = []` makes this a metadata-only package: pip installs the
+# declared dependencies but does NOT try to package the flat main.py /
+# outlook_com.py scripts (main.py imports the shared ../agent_util.py at
+# runtime via sys.path; outlook_com.py is a dependency-free mock).
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "openshuki-agent-meeting-planner"
+version = "0.1.0"
+description = "Meeting planner agent — find a slot + send an Outlook invite (mock COM, LangGraph)."
+requires-python = ">=3.9"
+dependencies = [
+    "langgraph>=0.2.0",
+]
+
+[tool.setuptools]
+py-modules = []

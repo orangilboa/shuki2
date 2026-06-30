@@ -1,43 +1,39 @@
-// Per-agent Python virtualenvs.
+// Per-agent Python virtualenvs, provisioned with uv.
 //
 // Each Python agent (a subdirectory of `agents/` containing a `main.py`) gets
 // its own `.venv`. This keeps an agent's dependency set isolated from every
 // other agent so version conflicts can't leak across agents.
 //
+// Dependencies are installed with `uv`, which links packages from a single
+// global content-addressed cache (clone/hardlink) instead of copying a fresh
+// copy into every venv. So identical versions across agents (e.g. langgraph in
+// both `weather` and `meeting-planner`) are stored once on disk and resolved/
+// built once — full isolation, no duplication. uv is auto-installed if missing
+// (see ensure-uv.mjs).
+//
 // For each Python agent this script:
-//   1. Creates `agents/<name>/.venv` if it doesn't already exist.
-//   2. Installs the shared `agents/requirements.txt` (langgraph, langchain-core)
-//      plus the agent's own `agents/<name>/requirements.txt`, if present, into
-//      that venv.
+//   1. Creates `agents/<name>/.venv` (via `uv venv`) if it doesn't exist.
+//   2. Installs that agent's own declared dependencies into the venv:
+//        - `agents/<name>/pyproject.toml`  -> `uv pip install <dir>` (preferred), or
+//        - `agents/<name>/requirements.txt` -> `uv pip install -r <file>` (fallback).
+//      Each agent declares exactly what it imports; nothing is shared, so e.g.
+//      the stdlib-only agents pull in no third-party packages.
 //
 // The agents.json `exec.command` for Python agents is `{VENV_PYTHON}`, which the
 // subprocess runner resolves to `<cwd>/.venv/(bin|Scripts)/python` — i.e. this
 // exact venv. Re-runnable and idempotent: existing venvs are reused, deps are
-// re-installed (pip no-ops when already satisfied).
+// re-installed (uv no-ops when already satisfied).
 
 import { existsSync, readdirSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve, join } from "node:path";
+import { findUv, ensureUv } from "./ensure-uv.mjs";
 
 // Resolve `agents/` relative to this script (scripts/ → ../agents), not the
 // cwd, so the script works whether invoked from the repo root or from agents/.
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const AGENTS_DIR = resolve(SCRIPT_DIR, "..", "agents");
-const SHARED_REQUIREMENTS = join(AGENTS_DIR, "requirements.txt");
-
-/** Locate a base Python interpreter usable for `-m venv`. */
-function findPython() {
-  const candidates =
-    process.platform === "win32" ? ["py", "python", "python3"] : ["python3", "python"];
-  for (const cmd of candidates) {
-    const probeArgs = cmd === "py" ? ["-3", "--version"] : ["--version"];
-    const result = spawnSync(cmd, probeArgs, { stdio: "ignore", shell: false });
-    if (result.error?.code === "ENOENT") continue;
-    if (result.status === 0) return cmd;
-  }
-  return null;
-}
 
 /** Path to the venv's python, cross-platform. Mirrors the runner's resolution. */
 function venvPython(venvDir) {
@@ -69,17 +65,10 @@ if (agentDirs.length === 0) {
   process.exit(0);
 }
 
-const py = findPython();
-if (!py) {
-  console.error(
-    "could not find a Python interpreter (tried: py/python/python3). " +
-      "Install Python 3 and re-run."
-  );
-  process.exit(1);
-}
-
-const baseVenvArgs = (target) =>
-  py === "py" ? ["-3", "-m", "venv", target] : ["-m", "venv", target];
+// `agents:install` runs `node scripts/ensure-uv.mjs` first, so uv is normally
+// already present (findUv). Fall back to ensureUv() so this script also works
+// when run standalone.
+const uv = findUv() ?? ensureUv();
 
 for (const dir of agentDirs) {
   const name = dir.slice(AGENTS_DIR.length + 1);
@@ -90,24 +79,26 @@ for (const dir of agentDirs) {
     console.log(`[${name}] .venv exists — reusing`);
   } else {
     console.log(`[${name}] creating .venv …`);
-    run(py, baseVenvArgs(venvDir));
+    run(uv, ["venv", venvDir]);
   }
 
-  // Collect requirements: the shared set first, then the agent's own (if any).
-  const reqFiles = [];
-  if (existsSync(SHARED_REQUIREMENTS)) reqFiles.push(SHARED_REQUIREMENTS);
+  // Install the agent's own declared dependencies into its venv. uv links from
+  // its global cache, so identical versions across agents aren't re-stored.
+  // Prefer pyproject.toml; fall back to a requirements.txt. An agent with
+  // neither declares no third-party deps.
+  const pyproject = join(dir, "pyproject.toml");
   const ownReq = join(dir, "requirements.txt");
-  if (existsSync(ownReq)) reqFiles.push(ownReq);
+  const pipBase = ["pip", "install", "--python", vpy];
 
-  if (reqFiles.length === 0) {
-    console.log(`[${name}] no requirements to install`);
-    continue;
+  if (existsSync(pyproject)) {
+    console.log(`[${name}] installing deps from pyproject.toml …`);
+    run(uv, [...pipBase, dir]);
+  } else if (existsSync(ownReq)) {
+    console.log(`[${name}] installing deps from requirements.txt …`);
+    run(uv, [...pipBase, "-r", ownReq]);
+  } else {
+    console.log(`[${name}] no dependency file — nothing to install`);
   }
-
-  const pipArgs = ["-m", "pip", "install", "--disable-pip-version-check"];
-  for (const f of reqFiles) pipArgs.push("-r", f);
-  console.log(`[${name}] installing deps (${reqFiles.length} requirements file(s)) …`);
-  run(vpy, pipArgs);
 }
 
 console.log(`done — ${agentDirs.length} agent venv(s) ready`);

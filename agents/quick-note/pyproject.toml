@@ -1,0 +1,20 @@
+# Dependencies for the quick-note agent. Installed into this agent's own venv
+# by `pnpm agents:install` (scripts/setup-agent-venvs.mjs).
+#
+# This agent is pure standard library (plus the shared, stdlib-only
+# ../agent_util.py), so it declares no third-party dependencies.
+# `py-modules = []` makes this a metadata-only package: pip won't try to
+# package the flat main.py script.
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "openshuki-agent-quick-note"
+version = "0.1.0"
+description = "Quick note agent — capture a note and save it as a markdown artifact."
+requires-python = ">=3.9"
+dependencies = []
+
+[tool.setuptools]
+py-modules = []

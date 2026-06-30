@@ -8,14 +8,31 @@ A walkthrough for adding a new Python agent to openshuki, complete with LangGrap
 agents/
   <your-agent>/
     main.py            # entrypoint — argparse + LangGraph
-    requirements.txt   # agent-specific deps (optional); shared deps live in agents/requirements.txt
+    pyproject.toml     # this agent's own deps ([project].dependencies)
     .venv/             # this agent's own virtualenv (created by `pnpm agents:install`; gitignored)
     (other modules)
 ```
 
-Agents share `agents/agent_util.py` (UTF-8 stdout + JSONL helpers) — your `main.py` imports from there. Shared deps (langgraph, langchain-core) live in `agents/requirements.txt`.
+Agents share `agents/agent_util.py` (UTF-8 stdout + JSONL helpers) — your `main.py` imports from there. `agent_util.py` is standard-library only, so it adds no dependencies.
 
-**Each Python agent runs in its own venv** at `agents/<your-agent>/.venv`. `pnpm agents:install` (from the repo root) creates it and installs the shared `agents/requirements.txt` plus your agent's own `requirements.txt` (if present) into it. Put deps that only your agent needs in `agents/<your-agent>/requirements.txt`; keep `agents/requirements.txt` for things every agent uses.
+**Each Python agent runs in its own venv** at `agents/<your-agent>/.venv`, and declares its **own** dependencies in `agents/<your-agent>/pyproject.toml`. `pnpm agents:install` (from the repo root) creates the venv with **uv** and installs those deps into it (`uv pip install <dir>`). uv shares identical package versions across agents via a global cache (clone/hardlink), so declaring `langgraph` in several agents stores it once — and uv is auto-installed by the `agents:install` command if you don't already have it. Declare exactly what your agent imports; an agent that only uses the standard library + `agent_util` declares an empty `dependencies` list. Use `agents/weather/pyproject.toml` as the template:
+
+```toml
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "openshuki-agent-<your-agent>"
+version = "0.1.0"
+requires-python = ">=3.9"
+dependencies = ["langgraph>=0.2.0"]   # whatever your main.py imports; [] if stdlib-only
+
+# Metadata-only: install the deps above without trying to package the flat
+# main.py script (which imports ../agent_util.py at runtime via sys.path).
+[tool.setuptools]
+py-modules = []
+```
 
 ## Skeleton
 

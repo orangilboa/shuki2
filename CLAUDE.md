@@ -61,7 +61,7 @@ pnpm dev:frontend
 pnpm agents:install
 ```
 
-`agents:install` creates a dedicated `.venv` inside each Python agent's directory (if missing) and installs that agent's dependencies into it — the shared `agents/requirements.txt` plus the agent's own `requirements.txt` if it has one. Each agent is therefore dependency-isolated. `pnpm install:all` runs the same venv setup before the workspace install.
+`agents:install` creates a dedicated `.venv` inside each Python agent's directory (if missing) and installs that agent's own declared dependencies into it from its `agents/<name>/pyproject.toml`. Each agent declares exactly what it imports, so it's fully dependency-isolated (stdlib-only agents pull in nothing). Dependencies are provisioned with **uv** — installed once into a global cache and clone/hardlinked into each venv, so identical versions across agents aren't duplicated on disk; `agents:install` auto-installs uv (via `scripts/ensure-uv.mjs`) if it's missing. `pnpm install:all` runs the same venv setup before the workspace install.
 
 Backend needs Postgres reachable at `DB_URL` (defaults to `postgresql://openshuki:openshuki@localhost:5432/openshuki`). See [docs/postgres.md](docs/postgres.md) for one-time DB + role provisioning. The backend runs an idempotent DDL script on every boot — adding a new table is a `CREATE TABLE IF NOT EXISTS` in `backend/src/db/migrate.ts` plus the matching Drizzle definition in `schema.ts`.
 

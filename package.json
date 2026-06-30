@@ -9,7 +9,7 @@
     "pnpm": ">=11"
   },
   "scripts": {
-    "install:all": "node scripts/setup-agent-venvs.mjs && pnpm install -r",
+    "install:all": "node scripts/ensure-uv.mjs && node scripts/setup-agent-venvs.mjs && pnpm install -r",
     "dev": "concurrently -n backend,frontend -c cyan,magenta \"cd backend && pnpm dev\" \"cd frontend && pnpm dev\"",
     "dev:backend": "concurrently -n backend -c cyan \"cd backend && pnpm dev\"",
     "dev:frontend": "concurrently -n frontend -c magenta \"cd frontend && pnpm dev\"",
@@ -17,7 +17,7 @@
     "build:backend": "concurrently -n backend -c cyan \"cd backend && pnpm build\"",
     "build:frontend": "concurrently -n frontend -c magenta \"cd frontend && pnpm build\"",
     "build:desktop": "pnpm --filter openshuki-backend build && pnpm --filter openshuki-frontend build && pnpm --filter openshuki-desktop package",
-    "agents:install": "pnpm install && pnpm --filter openshuki-tools run install:venvs",
+    "agents:install": "node scripts/ensure-uv.mjs && pnpm install && pnpm --filter openshuki-tools run install:venvs",
     "test:e2e": "pnpm --filter openshuki-e2e test",
     "test:e2e:install": "pnpm --filter openshuki-e2e install:browsers",
     "clean": "node scripts/clean.mjs"
